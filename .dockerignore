@@ -1,0 +1,20 @@
+# Git 
+.git
+.gitignore
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments (အလွန်အရေးကြီးပါသည်)
+.env
+venv/
+env/
+
+# Telegram Session 
+smile_bot.session
+smile_bot.session-journal
+
+# Logs
+*.log
