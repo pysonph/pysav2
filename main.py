@@ -970,7 +970,7 @@ async def handle_topup(message: types.Message):
 # ==========================================
 # 💳 BALANCE COMMAND & TOOLS
 # ==========================================
-@dp.message(or_f(Command("balance"), F.text.regexp(r"(?i)^\.bal$")))
+@dp.message(or_f(Command("balance"), F.text.regexp(r"(?i)^\.bal(?:$|\s+)")))
 async def check_balance_command(message: types.Message):
     if not await is_authorized(message.from_user.id): 
         return await message.reply("ɴᴏᴛ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ ᴜsᴇʀ.")
@@ -980,16 +980,15 @@ async def check_balance_command(message: types.Message):
     if not user_wallet: 
         return await message.reply("Yᴏᴜʀ ᴀᴄᴄᴏᴜɴᴛ ɪɴғᴏʀᴍᴀᴛɪᴏɴ ᴄᴀɴɴᴏᴛ ʙᴇ ғᴏᴜɴᴅ.")
     
-    # 🟢 သင့်ပုံထဲက Premium Emoji ID များကို ဒီနေရာမှာ ပြောင်းထည့်ပါ
-    ICON_EMOJI = "5956330306167376831" # အပြာရောင် icon လေးရဲ့ ID
-    BR_EMOJI = "5228878788867142213"   # 🇧🇷 အလံ Emoji ID
-    PH_EMOJI = "5231361434583049965"   # 🇵🇭 အလံ Emoji ID
+    # 🟢 Aiogram အတွက် မှန်ကန်သော Custom Emoji Tag များကို သုံးထားပါသည် (tg-emoji)
+    ICON_EMOJI = "5956330306167376831" 
+    BR_EMOJI = "5228878788867142213"   
+    PH_EMOJI = "5231361434583049965"   
 
-    # V-Wallet Balance (Blockquote ဖြင့်)
     report = (
-        f"<blockquote><emoji id='{ICON_EMOJI}'>💳</emoji> <b>𝗬𝗢𝗨𝗥 𝗪𝗔𝗟𝗟𝗘𝗧 𝗕𝗔𝗟𝗔𝗡𝗖𝗘</b>\n\n"
-        f"<emoji id='{BR_EMOJI}'>🇧🇷</emoji> 𝗕𝗥 𝗕𝗔𝗟𝗔𝗡𝗖𝗘 : ${user_wallet.get('br_balance', 0.0):,.2f}\n"
-        f"<emoji id='{PH_EMOJI}'>🇵🇭</emoji> 𝗣𝗛 𝗕𝗔𝗟𝗔𝗡𝗖𝗘 : ${user_wallet.get('ph_balance', 0.0):,.2f}</blockquote>"
+        f"<blockquote><tg-emoji emoji-id='{ICON_EMOJI}'>💳</tg-emoji> <b>𝗬𝗢𝗨𝗥 𝗪𝗔𝗟𝗟𝗘𝗧 𝗕𝗔𝗟𝗔𝗡𝗖𝗘</b>\n\n"
+        f"<tg-emoji emoji-id='{BR_EMOJI}'>🇧🇷</tg-emoji> 𝗕𝗥 𝗕𝗔𝗟𝗔𝗡𝗖𝗘 : ${user_wallet.get('br_balance', 0.0):,.2f}\n"
+        f"<tg-emoji emoji-id='{PH_EMOJI}'>🇵🇭</tg-emoji> 𝗣𝗛 𝗕𝗔𝗟𝗔𝗡𝗖𝗘 : ${user_wallet.get('ph_balance', 0.0):,.2f}</blockquote>"
     )
     
     if message.from_user.id == OWNER_ID:
@@ -999,19 +998,25 @@ async def check_balance_command(message: types.Message):
         try:
             balances = await get_smile_balance(scraper, headers, 'https://www.smile.one/customer/order')
             
-            # Official Balance ကို နောက်ထပ် Blockquote တစ်ခုအနေနဲ့ ဆက်ထည့်မည်
             report += (
-                f"\n\n<blockquote><emoji id='{ICON_EMOJI}'>💳</emoji> <b>𝗢𝗙𝗙𝗜𝗖𝗜𝗔𝗟 𝗔𝗖𝗖𝗢𝗨𝗡𝗧 𝗕𝗔𝗟𝗔𝗡𝗖𝗘</b>\n\n"
-                f"<emoji id='{BR_EMOJI}'>🇧🇷</emoji> 𝗕𝗥 𝗕𝗔𝗟𝗔𝗡𝗖𝗘 : ${balances.get('br_balance', 0.00):,.2f}\n"
-                f"<emoji id='{PH_EMOJI}'>🇵🇭</emoji> 𝗣𝗛 𝗕𝗔𝗟𝗔𝗡𝗖𝗘 : ${balances.get('ph_balance', 0.00):,.2f}</blockquote>"
+                f"\n\n<blockquote><tg-emoji emoji-id='{ICON_EMOJI}'>💳</tg-emoji> <b>𝗢𝗙𝗙𝗜𝗖𝗜𝗔𝗟 𝗔𝗖𝗖𝗢𝗨𝗡𝗧 𝗕𝗔𝗟𝗔𝗡𝗖𝗘</b>\n\n"
+                f"<tg-emoji emoji-id='{BR_EMOJI}'>🇧🇷</tg-emoji> 𝗕𝗥 𝗕𝗔𝗟𝗔𝗡𝗖𝗘 : ${balances.get('br_balance', 0.00):,.2f}\n"
+                f"<tg-emoji emoji-id='{PH_EMOJI}'>🇵🇭</tg-emoji> 𝗣𝗛 𝗕𝗔𝗟𝗔𝗡𝗖𝗘 : ${balances.get('ph_balance', 0.00):,.2f}</blockquote>"
             )
             
             await loading_msg.edit_text(report, parse_mode=ParseMode.HTML)
-        except:
-            # Error တက်ခဲ့ရင်တောင် V-Wallet ကိုတော့ ဆက်ပြပေးမည်
-            await loading_msg.edit_text(report, parse_mode=ParseMode.HTML)
+        except Exception as e:
+            print(f"Balance Scrape Error: {e}")
+            # Scraping Error တက်ခဲ့ရင်တောင် V-Wallet (DB) Balance ကိုတော့ ပြပေးမည်
+            try:
+                await loading_msg.edit_text(report, parse_mode=ParseMode.HTML)
+            except:
+                pass
     else:
-        await message.reply(report, parse_mode=ParseMode.HTML)
+        try:
+            await message.reply(report, parse_mode=ParseMode.HTML)
+        except:
+            pass
 
 @dp.message(or_f(Command("history"), F.text.regexp(r"(?i)^\.his$")))
 async def send_order_history(message: types.Message):
@@ -1523,11 +1528,11 @@ async def send_welcome(message: types.Message):
             status = "🔴 Nᴏᴛ Aᴄᴛɪᴠᴇ"
             
         welcome_text = (
-            f"ʜᴇʏ ʙᴀʙʏ <emoji id='{EMOJI_1}'>🥺</emoji>\n\n"
-            f"<emoji id='{EMOJI_2}'>👤</emoji> Usᴇʀɴᴀᴍᴇ: {username_display}\n"
-            f"<emoji id='{EMOJI_3}'>🆔</emoji> 𝐈𝐃: <code>{tg_id}</code>\n"
-            f"<emoji id='{EMOJI_4}'>📊</emoji> Sᴛᴀᴛᴜs: {status}\n\n"
-            f"<emoji id='{EMOJI_5}'>📞</emoji> Cᴏɴᴛᴀᴄᴛ ᴜs: @iwillgoforwardsalone"
+            f"ʜᴇʏ ʙᴀʙʏ <tg-emoji emoji-id='{EMOJI_1}'>🥺</tg-emoji>\n\n"
+            f"<tg-emoji emoji-id='{EMOJI_2}'>👤</tg-emoji> Usᴇʀɴᴀᴍᴇ: {username_display}\n"
+            f"<tg-emoji emoji-id='{EMOJI_3}'>🆔</tg-emoji> 𝐈𝐃: <code>{tg_id}</code>\n"
+            f"<tg-emoji emoji-id='{EMOJI_4}'>📊</tg-emoji> Sᴛᴀᴛᴜs: {status}\n\n"
+            f"<tg-emoji emoji-id='{EMOJI_5}'>📞</tg-emoji> Cᴏɴᴛᴀᴄᴛ ᴜs: @iwillgoforwardsalone"
         )
         
         await message.reply(welcome_text, parse_mode=ParseMode.HTML)
