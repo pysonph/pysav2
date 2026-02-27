@@ -3,6 +3,7 @@ import os
 import re
 import datetime
 import time
+from aiogram.filters import Command, or_f
 from bs4 import BeautifulSoup
 import random
 from dotenv import load_dotenv
@@ -586,7 +587,7 @@ async def is_authorized(user_id: int):
 # ==========================================
 # 5. RESELLER MANAGEMENT & COMMANDS
 # ==========================================
-@dp.message(Command("add") | F.text.regexp(r"(?i)^\.add(?:$|\s+)"))
+@dp.message(or_f(Command("add"), F.text.regexp(r"(?i)^\.add(?:$|\s+)")))
 async def add_reseller(message: types.Message):
     if message.from_user.id != OWNER_ID: return await message.reply("You are not the Owner.")
     parts = message.text.split()
@@ -600,7 +601,7 @@ async def add_reseller(message: types.Message):
     else:
         await message.reply(f"Reseller ID `{target_id}` is already in the list.")
 
-@dp.message(Command("remove") | F.text.regexp(r"(?i)^\.remove(?:$|\s+)"))
+@dp.message(or_f(Command("remove"), F.text.regexp(r"(?i)^\.remove(?:$|\s+)")))
 async def remove_reseller(message: types.Message):
     if message.from_user.id != OWNER_ID: return await message.reply("You are not the Owner.")
     parts = message.text.split()
@@ -614,7 +615,7 @@ async def remove_reseller(message: types.Message):
     else:
         await message.reply("That ID is not in the list.")
 
-@dp.message(Command("users") | F.text.regexp(r"(?i)^\.users$"))
+@dp.message(or_f(Command("users"), F.text.regexp(r"(?i)^\.users$")))
 async def list_resellers(message: types.Message):
     if message.from_user.id != OWNER_ID: return await message.reply("You are not the Owner.")
     resellers_list = await db.get_all_resellers()
@@ -667,7 +668,7 @@ async def handle_raw_cookie_dump(message: types.Message):
 # ==========================================
 # 💰 MANUAL BALANCE ADDITION (OWNER ONLY)
 # ==========================================
-@dp.message(Command("addbal") | F.text.regexp(r"(?i)^\.addbal(?:$|\s+)"))
+@dp.message(or_f(Command("addbal"), F.text.regexp(r"(?i)^\.addbal(?:$|\s+)")))
 async def add_balance_command(message: types.Message):
     # 🟢 Owner သာလျှင် ဤ Command ကို အသုံးပြုခွင့်ရှိပါမည်
     if message.from_user.id != OWNER_ID:
@@ -741,7 +742,7 @@ async def add_balance_command(message: types.Message):
 # ==========================================
 # 💸 MANUAL BALANCE DEDUCTION (OWNER ONLY)
 # ==========================================
-@dp.message(Command("deduct") | F.text.regexp(r"(?i)^\.deduct(?:$|\s+)"))
+@dp.message(or_f(Command("deduct"), F.text.regexp(r"(?i)^\.deduct(?:$|\s+)")))
 async def deduct_balance_command(message: types.Message):
     # 🟢 Owner သာလျှင် ဤ Command ကို အသုံးပြုခွင့်ရှိပါမည်
     if message.from_user.id != OWNER_ID:
@@ -969,7 +970,7 @@ async def handle_topup(message: types.Message):
 # ==========================================
 # 💳 BALANCE COMMAND & TOOLS
 # ==========================================
-@dp.message(Command("balance") | F.text.regexp(r"(?i)^\.bal$"))
+@dp.message(or_f(Command("balance"), F.text.regexp(r"(?i)^\.bal$")))
 async def check_balance_command(message: types.Message):
     if not await is_authorized(message.from_user.id): 
         return await message.reply("ɴᴏᴛ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ ᴜsᴇʀ.")
@@ -1012,7 +1013,7 @@ async def check_balance_command(message: types.Message):
     else:
         await message.reply(report, parse_mode=ParseMode.HTML)
 
-@dp.message(Command("history") | F.text.regexp(r"(?i)^\.his$"))
+@dp.message(or_f(Command("history"), F.text.regexp(r"(?i)^\.his$")))
 async def send_order_history(message: types.Message):
     if not await is_authorized(message.from_user.id): return await message.reply("ɴᴏᴛ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ ᴜsᴇʀ.")
     tg_id = str(message.from_user.id)
@@ -1032,7 +1033,7 @@ async def send_order_history(message: types.Message):
     document = BufferedInputFile(file_bytes, filename=f"History_{tg_id}.txt")
     await message.answer_document(document=document, caption=f"📜 **Order History**\n👤 User: @{user_name}\n📊 Records: {len(history_data)}")
 
-@dp.message(Command("clean") | F.text.regexp(r"(?i)^\.clean$"))
+@dp.message(or_f(Command("clean"), F.text.regexp(r"(?i)^\.clean$")))
 async def clean_order_history(message: types.Message):
     if not await is_authorized(message.from_user.id): return await message.reply("ɴᴏᴛ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ ᴜsᴇʀ.")
     tg_id = str(message.from_user.id)
@@ -1248,19 +1249,19 @@ def generate_list(package_dict):
         lines.append(f"{key:<5} : ${total_price:,.2f}")
     return "\n".join(lines)
 
-@dp.message(Command("listb") | F.text.regexp(r"(?i)^\.listb$"))
+@dp.message(or_f(Command("listb"), F.text.regexp(r"(?i)^\.listb$")))
 async def show_price_list_br(message: types.Message):
     if not await is_authorized(message.from_user.id): return await message.reply("ɴᴏᴛ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ ᴜsᴇʀ.")
     response_text = f"🇧🇷 <b>𝘿𝙤𝙪𝙗𝙡𝙚 𝙋𝙖𝙘𝙠𝙖𝙜𝙚𝙨</b>\n<code>{generate_list(DOUBLE_DIAMOND_PACKAGES)}</code>\n\n🇧🇷 <b>𝘽𝙧 𝙋𝙖𝙘𝙠𝙖𝙜𝙚𝙨</b>\n<code>{generate_list(BR_PACKAGES)}</code>"
     await message.reply(response_text, parse_mode=ParseMode.HTML)
 
-@dp.message(Command("listp") | F.text.regexp(r"(?i)^\.listp$"))
+@dp.message(or_f(Command("listp"), F.text.regexp(r"(?i)^\.listp$")))
 async def show_price_list_ph(message: types.Message):
     if not await is_authorized(message.from_user.id): return await message.reply("ɴᴏᴛ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ ᴜsᴇʀ.")
     response_text = f"🇵🇭 <b>𝙋𝙝 𝙋𝙖𝙘𝙠𝙖𝙜𝙚𝙨</b>\n<code>{generate_list(PH_PACKAGES)}</code>"
     await message.reply(response_text, parse_mode=ParseMode.HTML)
 
-@dp.message(Command("listmb") | F.text.regexp(r"(?i)^\.listmb$"))
+@dp.message(or_f(Command("listmb"), F.text.regexp(r"(?i)^\.listmb$")))
 async def show_price_list_mcc(message: types.Message):
     if not await is_authorized(message.from_user.id): return await message.reply("ɴᴏᴛ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ ᴜsᴇʀ.")
     response_text = f"🇧🇷 <b>𝙈𝘾𝘾 𝙋𝘼𝘾𝙆𝘼𝙂𝙀𝙎</b>\n<code>{generate_list(MCC_PACKAGES)}</code>\n\n🇵🇭 <b>𝙋𝙝 𝙈𝘾𝘾 𝙋𝙖𝙘𝙠𝙖𝙜𝙚𝙨</b>\n<code>{generate_list(PH_MCC_PACKAGES)}</code>"
@@ -1353,7 +1354,7 @@ async def notify_owner(text: str):
 # ==========================================
 # 🍪 CHECK COOKIE STATUS COMMAND
 # ==========================================
-@dp.message(Command("cookies") | F.text.regexp(r"(?i)^\.cookies$"))
+@dp.message(or_f(Command("cookies"), F.text.regexp(r"(?i)^\.cookies$")))
 async def check_cookie_status(message: types.Message):
     if message.from_user.id != OWNER_ID: 
         return await message.reply("❌ You are not authorized to check system cookies.")
@@ -1379,7 +1380,7 @@ async def check_cookie_status(message: types.Message):
         await loading_msg.edit_text(f"❌ Error checking cookie: {str(e)}")
 
 
-@dp.message(Command("role") | F.text.regexp(r"(?i)^\.role\s+"))
+@dp.message(or_f(Command("role"), F.text.regexp(r"(?i)^\.role(?:$|\s+)")))
 async def handle_check_role(message: types.Message):
     if not await is_authorized(message.from_user.id):
         return await message.reply("ɴᴏᴛ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ ᴜsᴇʀ.")
@@ -1465,7 +1466,7 @@ async def handle_check_role(message: types.Message):
 # ==========================================
 # ℹ️ HELP & START COMMANDS
 # ==========================================
-@dp.message(Command("help") | F.text.regexp(r"(?i)^\.help$"))
+@dp.message(or_f(Command("help"), F.text.regexp(r"(?i)^\.help$")))
 async def send_help_message(message: types.Message):
     is_owner = (message.from_user.id == OWNER_ID)
     help_text = (
