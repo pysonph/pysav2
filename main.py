@@ -1512,7 +1512,7 @@ async def handle_check_role(message: types.Message):
 
 
 # ==========================================
-# 🔍 1. DISPUTE & VERIFICATION COMMAND (FIXED WITH JSON API)
+# 🔍 1. DISPUTE & VERIFICATION COMMAND (FIXED JSON KEYS)
 # ==========================================
 @dp.message(or_f(Command("checkcus"), F.text.regexp(r"(?i)^\.checkcus(?:$|\s+)")))
 async def check_official_customer(message: types.Message):
@@ -1529,7 +1529,6 @@ async def check_official_customer(message: types.Message):
     scraper = await get_main_scraper()
     headers = {'X-Requested-With': 'XMLHttpRequest', 'Origin': 'https://www.smile.one'}
     
-    # 🟢 BR နှင့် PH နှစ်ခုလုံး၏ Order History API များကို စစ်ဆေးမည်
     urls_to_check = [
         'https://www.smile.one/customer/activationcode/codelist',
         'https://www.smile.one/ph/customer/activationcode/codelist'
@@ -1539,7 +1538,6 @@ async def check_official_customer(message: types.Message):
     
     try:
         for api_url in urls_to_check:
-            # 🟢 နောက်ဆုံး အော်ဒါ အခု ၅၀ စာကို ဆွဲထုတ်မည်
             res = await asyncio.to_thread(
                 scraper.get, api_url, 
                 params={'type': 'orderlist', 'p': '1', 'pageSize': '50'}, 
@@ -1549,8 +1547,9 @@ async def check_official_customer(message: types.Message):
                 data = res.json()
                 if 'list' in data and isinstance(data['list'], list):
                     for order in data['list']:
-                        # 🟢 မိမိရှာဖွေလိုသော Game ID နှင့် ကိုက်ညီမှုရှိ/မရှိ စစ်ဆေးမည်
-                        if str(order.get('user_id')) == str(game_id):
+                        # 🟢 user_id သို့မဟုတ် role_id ဖြစ်နိုင်ခြေ နှစ်ခုလုံးကို ရှာမည်
+                        current_user_id = str(order.get('user_id') or order.get('role_id') or '')
+                        if current_user_id == str(game_id):
                             found_orders.append(order)
             except:
                 pass
@@ -1558,16 +1557,16 @@ async def check_official_customer(message: types.Message):
         if not found_orders:
             return await loading_msg.edit_text(f"❌ No official records found for Game ID: `{game_id}` in recent 50 transactions.")
             
-        # 🟢 နောက်ဆုံးဝယ်ထားသော အော်ဒါ ၅ ကြိမ်ကိုသာ ပြသမည်
         found_orders = found_orders[:5]
         
         report = f"🔍 **Official Records for {game_id}**\n\n"
         for order in found_orders:
-            date_str = order.get('created_at', 'Unknown Date')
-            item_name = order.get('product_name', 'Unknown Item')
-            price = order.get('price', '0.00')
-            status_val = str(order.get('order_status', '')).lower()
+            # 🟢 Smile.One မှ သုံးလေ့ရှိသော Keys အားလုံးကို အဆင့်ဆင့် စစ်ဆေး၍ ဆွဲထုတ်မည်
+            date_str = str(order.get('created_at') or order.get('create_time') or order.get('add_time') or order.get('pay_time') or 'Unknown Date')
+            item_name = str(order.get('product_name') or order.get('goods_title') or order.get('title') or order.get('name') or order.get('goods_name') or 'Unknown Item')
+            price = str(order.get('price') or order.get('pay_amount') or order.get('amount') or order.get('total_amount') or '0.00')
             
+            status_val = str(order.get('order_status', '')).lower()
             if status_val == 'success' or str(order.get('status')) == '1':
                 status = "✅ Success"
             else:
