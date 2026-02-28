@@ -9,6 +9,7 @@ import random
 from dotenv import load_dotenv
 import asyncio
 from playwright.async_api import async_playwright
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import html
 from collections import defaultdict
 import concurrent.futures
@@ -1732,6 +1733,36 @@ async def daily_reconciliation_task():
             
         except Exception as e:
             print(f"Reconciliation Error: {e}")
+
+
+
+# ==========================================
+# 📋 AUTO FORMAT & COPY BUTTON (ID & ZONE)
+# ==========================================
+# 🟢 ဂဏန်း (ဂဏန်း) ဂဏန်း ပုံစံမျိုး လာသမျှကို အလိုအလျောက် ဖမ်းယူမည်
+@dp.message(F.text.regexp(r"^\d+\s*\(\d+\).*"))
+async def format_and_copy_text(message: types.Message):
+    # 🟢 User ပို့လိုက်သော စာသားကို အတိအကျ ယူမည် (ရှေ့က Emoji လုံးဝမထည့်ပါ)
+    raw_text = message.text.strip()
+    
+    # 🟢 ဖုန်းပေါ်တွင် စာသားကို တစ်ချက်နှိပ်ရုံဖြင့် Copy ကူးနိုင်ရန် <code>...</code> ဖြင့် ပိတ်ပေးမည်
+    formatted_text = f"<code>{raw_text}</code>"
+    
+    # 🟢 Copy  Button ဖန်တီးခြင်း (Telegram Bot API အသစ်ပါ CopyTextButton ကို သုံးထားပါသည်)
+    try:
+        from aiogram.types import CopyTextButton
+        copy_btn = InlineKeyboardButton(
+            text="ᴄᴏᴘʏ",
+            copy_text=CopyTextButton(text=raw_text)
+        )
+    except ImportError:
+        # 💡 အကယ်၍ Aiogram Version အဟောင်းဖြစ်နေပါက Fallback အနေဖြင့် သုံးရန်
+        copy_btn = InlineKeyboardButton(text="ᴄᴏᴘʏ", switch_inline_query=raw_text)
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[copy_btn]])
+    
+    # 🟢 Reply ပြန်ပို့ပေးမည်
+    await message.reply(formatted_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
 
 ##############################################
