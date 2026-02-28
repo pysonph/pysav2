@@ -1514,21 +1514,23 @@ async def handle_check_role(message: types.Message):
 # ==========================================
 # 🔍 1. DISPUTE & VERIFICATION COMMAND (ULTIMATE FIX)
 # ==========================================
-@dp.message(or_f(Command("checkcus"), F.text.regexp(r"(?i)^\.checkcus(?:$|\s+)")))
+@dp.message(or_f(Command("checkcus"), F.text.regexp(r"(?i)^\.cus(?:$|\s+)")))
 async def check_official_customer(message: types.Message):
+    # 🟢 Owner သာလျှင် စစ်ဆေးခွင့်ရှိပါမည်
     if message.from_user.id != OWNER_ID:
         return await message.reply("❌ You are not authorized.")
         
     parts = message.text.strip().split()
     if len(parts) < 2:
-        return await message.reply("⚠️ **Usage:** `.checkcus <Game_ID>`")
+        return await message.reply("⚠️ <b>Usage:</b> <code>.checkcus &lt;Game_ID&gt;</code>", parse_mode=ParseMode.HTML)
         
     game_id = parts[1]
-    loading_msg = await message.reply(f"🔍 Searching Official JSON Records for Game ID: `{game_id}`...")
+    loading_msg = await message.reply(f"🔍 Searching Official JSON Records for Game ID: <code>{game_id}</code>...", parse_mode=ParseMode.HTML)
     
     scraper = await get_main_scraper()
     headers = {'X-Requested-With': 'XMLHttpRequest', 'Origin': 'https://www.smile.one'}
     
+    # 🟢 BR နှင့် PH နှစ်ခုလုံး၏ Order History API များကို စစ်ဆေးမည်
     urls_to_check = [
         'https://www.smile.one/customer/activationcode/codelist',
         'https://www.smile.one/ph/customer/activationcode/codelist'
@@ -1538,6 +1540,7 @@ async def check_official_customer(message: types.Message):
     
     try:
         for api_url in urls_to_check:
+            # 🟢 နောက်ဆုံး အော်ဒါ အခု ၅၀ စာကို ဆွဲထုတ်မည်
             res = await asyncio.to_thread(
                 scraper.get, api_url, 
                 params={'type': 'orderlist', 'p': '1', 'pageSize': '50'}, 
@@ -1547,6 +1550,7 @@ async def check_official_customer(message: types.Message):
                 data = res.json()
                 if 'list' in data and isinstance(data['list'], list):
                     for order in data['list']:
+                        # 🟢 user_id သို့မဟုတ် role_id ဖြစ်နိုင်ခြေ နှစ်ခုလုံးကို ရှာမည်
                         current_user_id = str(order.get('user_id') or order.get('role_id') or '')
                         if current_user_id == str(game_id):
                             found_orders.append(order)
@@ -1554,36 +1558,44 @@ async def check_official_customer(message: types.Message):
                 pass
                 
         if not found_orders:
-            return await loading_msg.edit_text(f"❌ No official records found for Game ID: `{game_id}` in recent 50 transactions.")
+            return await loading_msg.edit_text(f"❌ No official records found for Game ID: <code>{game_id}</code> in recent 50 transactions.", parse_mode=ParseMode.HTML)
             
+        # 🟢 နောက်ဆုံးဝယ်ထားသော အော်ဒါ ၅ ကြိမ်ကိုသာ ပြသမည်
         found_orders = found_orders[:5]
         
-        report = f"🔍 **Official Records for {game_id}**\n\n"
+        # 🟢 HTML ParseMode ဖြင့် စာလုံးအမည်း (Bold) ဖြစ်စေရန် <b> tag ကို သုံးထားပါသည်
+        report = f"🔍 <b>Official Records for {game_id}</b>\n\n"
+        
         for order in found_orders:
-            # 🟢 ဖြစ်နိုင်ခြေရှိသော Keys အသစ်များ (insert_time, real_money, စသည်) အားလုံး ထပ်တိုးထားပါသည်
-            date_str = str(order.get('created_at') or order.get('create_time') or order.get('insert_time') or order.get('add_time') or order.get('pay_time') or 'Unknown Date')
-            item_name = str(order.get('product_name') or order.get('goods_title') or order.get('title') or order.get('name') or order.get('goods_name') or 'Unknown Item')
-            price = str(order.get('price') or order.get('real_money') or order.get('pay_amount') or order.get('money') or order.get('amount') or order.get('total_amount') or '0.00')
-            
-            # 💡 သို့တိုင်အောင် ရှာမတွေ့သေးပါက Smile.One က ပေးပို့သော Keys အစစ်များကို ဖော်ပြပေးမည် (ပြင်ဆင်ရန် လွယ်ကူစေရန်)
-            if date_str == 'Unknown Date' or price == '0.00' or price == '0':
-                available_keys = ", ".join(order.keys())
-                debug_info = f"\n🛠 <i>Keys: {available_keys}</i>"
-            else:
-                debug_info = ""
+            # 🟢 Serial/Order ID (increment_id) ကို ဆွဲထုတ်ခြင်း
+            serial_id = str(order.get('increment_id') or order.get('id') or 'Unknown Serial')
 
-            status_val = str(order.get('order_status', '')).lower()
-            if status_val == 'success' or str(order.get('status')) == '1':
+            # 🟢 နေ့စွဲ၊ ပစ္စည်းအမည် နှင့် စျေးနှုန်းများ (Keys ပေါင်းစုံဖြင့် ရှာဖွေခြင်း)
+            date_str = str(order.get('created_at') or order.get('updated_at') or order.get('create_time') or order.get('insert_time') or order.get('add_time') or order.get('pay_time') or 'Unknown Date')
+            
+            item_name = str(order.get('product_name') or order.get('goods_name') or order.get('goods_title') or order.get('title') or order.get('name') or 'Unknown Item')
+            
+            price = str(order.get('price') or order.get('grand_total') or order.get('transaction_amount') or order.get('real_money') or order.get('pay_amount') or order.get('money') or order.get('amount') or order.get('total_amount') or '0.00')
+            
+            # 🟢 Currency (ဥပမာ - BRL, PHP) ပါရင် တွဲပြပေးရန်
+            currency_sym = str(order.get('total_fee_currency') or '$')
+            if currency_sym != '$':
+                price_display = f"{price} {currency_sym}"
+            else:
+                price_display = f"${price}"
+
+            status_val = str(order.get('order_status', '') or order.get('status', '')).lower()
+            if status_val in ['success', '1']:
                 status = "✅ Success"
             else:
                 status = f"⚠️ {status_val.capitalize()}"
                 
-            report += f"📅 `{date_str}`\n💎 {item_name} (${price}){debug_info}\n📊 Status: {status}\n\n"
+            report += f"🏷 <code>{serial_id}</code>\n📅 <code>{date_str}</code>\n💎 {item_name} ({price_display})\n📊 Status: {status}\n\n"
             
         await loading_msg.edit_text(report, parse_mode=ParseMode.HTML)
         
     except Exception as e:
-        await loading_msg.edit_text(f"❌ Search Error: {str(e)}")
+        await loading_msg.edit_text(f"❌ Search Error: {str(e)}", parse_mode=ParseMode.HTML)
         
 
 # ==========================================
