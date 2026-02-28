@@ -1512,7 +1512,7 @@ async def handle_check_role(message: types.Message):
 
 
 # ==========================================
-# 🔍 1. DISPUTE & VERIFICATION COMMAND (FIXED JSON KEYS)
+# 🔍 1. DISPUTE & VERIFICATION COMMAND (ULTIMATE FIX)
 # ==========================================
 @dp.message(or_f(Command("checkcus"), F.text.regexp(r"(?i)^\.checkcus(?:$|\s+)")))
 async def check_official_customer(message: types.Message):
@@ -1547,7 +1547,6 @@ async def check_official_customer(message: types.Message):
                 data = res.json()
                 if 'list' in data and isinstance(data['list'], list):
                     for order in data['list']:
-                        # 🟢 user_id သို့မဟုတ် role_id ဖြစ်နိုင်ခြေ နှစ်ခုလုံးကို ရှာမည်
                         current_user_id = str(order.get('user_id') or order.get('role_id') or '')
                         if current_user_id == str(game_id):
                             found_orders.append(order)
@@ -1561,20 +1560,27 @@ async def check_official_customer(message: types.Message):
         
         report = f"🔍 **Official Records for {game_id}**\n\n"
         for order in found_orders:
-            # 🟢 Smile.One မှ သုံးလေ့ရှိသော Keys အားလုံးကို အဆင့်ဆင့် စစ်ဆေး၍ ဆွဲထုတ်မည်
-            date_str = str(order.get('created_at') or order.get('create_time') or order.get('add_time') or order.get('pay_time') or 'Unknown Date')
+            # 🟢 ဖြစ်နိုင်ခြေရှိသော Keys အသစ်များ (insert_time, real_money, စသည်) အားလုံး ထပ်တိုးထားပါသည်
+            date_str = str(order.get('created_at') or order.get('create_time') or order.get('insert_time') or order.get('add_time') or order.get('pay_time') or 'Unknown Date')
             item_name = str(order.get('product_name') or order.get('goods_title') or order.get('title') or order.get('name') or order.get('goods_name') or 'Unknown Item')
-            price = str(order.get('price') or order.get('pay_amount') or order.get('amount') or order.get('total_amount') or '0.00')
+            price = str(order.get('price') or order.get('real_money') or order.get('pay_amount') or order.get('money') or order.get('amount') or order.get('total_amount') or '0.00')
             
+            # 💡 သို့တိုင်အောင် ရှာမတွေ့သေးပါက Smile.One က ပေးပို့သော Keys အစစ်များကို ဖော်ပြပေးမည် (ပြင်ဆင်ရန် လွယ်ကူစေရန်)
+            if date_str == 'Unknown Date' or price == '0.00' or price == '0':
+                available_keys = ", ".join(order.keys())
+                debug_info = f"\n🛠 <i>Keys: {available_keys}</i>"
+            else:
+                debug_info = ""
+
             status_val = str(order.get('order_status', '')).lower()
             if status_val == 'success' or str(order.get('status')) == '1':
                 status = "✅ Success"
             else:
                 status = f"⚠️ {status_val.capitalize()}"
                 
-            report += f"📅 `{date_str}`\n💎 {item_name} (${price})\n📊 Status: {status}\n\n"
+            report += f"📅 `{date_str}`\n💎 {item_name} (${price}){debug_info}\n📊 Status: {status}\n\n"
             
-        await loading_msg.edit_text(report)
+        await loading_msg.edit_text(report, parse_mode=ParseMode.HTML)
         
     except Exception as e:
         await loading_msg.edit_text(f"❌ Search Error: {str(e)}")
