@@ -1573,7 +1573,7 @@ async def check_official_customer(message: types.Message):
         if not found_orders:
             return await loading_msg.edit_text(f"❌ No successful records found for Game ID: <code>{game_id}</code> in recent transactions.", parse_mode=ParseMode.HTML)
             
-        found_orders = found_orders[:10] 
+        found_orders = found_orders[:2] 
         
         report = f"🎉 <b>Oғғɪᴄɪᴀʟ Rᴇᴄᴏʀᴅs ғᴏʀ{game_id}</b>\n\n"
         
