@@ -148,3 +148,48 @@ async def clear_user_history(tg_id):
     """User တစ်ယောက်၏ Order History အားလုံးကို ဖျက်မည်"""
     result = await orders_col.delete_many({"tg_id": str(tg_id)})
     return result.deleted_count
+
+
+# ==========================================
+# 👑 VIP CUSTOMER & RECONCILIATION MANAGEMENT
+# ==========================================
+async def set_vip_status(tg_id, is_vip: bool):
+    """User တစ်ယောက်ကို VIP အဖြစ် သတ်မှတ်ရန် သို့မဟုတ် ရုပ်သိမ်းရန်"""
+    result = await resellers_col.update_one(
+        {"tg_id": str(tg_id)},
+        {"$set": {"is_vip": is_vip}}
+    )
+    return result.modified_count > 0
+
+async def get_top_customers(limit=10):
+    """ငွေအများဆုံး သုံးစွဲထားသော (Top Spenders) Customer များကို ရှာဖွေရန်"""
+    pipeline = [
+        {"$match": {"status": "success"}},
+        {"$group": {
+            "_id": "$tg_id",
+            "total_spent": {"$sum": "$price"},
+            "order_count": {"$sum": 1}
+        }},
+        {"$sort": {"total_spent": -1}},
+        {"$limit": limit}
+    ]
+    cursor = orders_col.aggregate(pipeline)
+    return await cursor.to_list(length=limit)
+
+async def get_today_orders_summary():
+    """ယနေ့အတွက် DB ထဲရှိ Order အနှစ်ချုပ်ကို ယူရန် (Reconciliation အတွက်)"""
+    now = datetime.datetime.now(MMT)
+    start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    pipeline = [
+        {"$match": {"status": "success", "timestamp": {"$gte": start_of_day}}},
+        {"$group": {
+            "_id": None,
+            "total_spent": {"$sum": "$price"},
+            "total_orders": {"$sum": 1}
+        }}
+    ]
+    cursor = orders_col.aggregate(pipeline)
+    result = await cursor.to_list(length=1)
+    return result[0] if result else {"total_spent": 0.0, "total_orders": 0}
+
