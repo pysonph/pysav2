@@ -259,9 +259,9 @@ PH_MCC_PACKAGES = {
     '1163': [{'pid': '23914', 'price': 902.50, 'name': '1163 💎'}],
     '2398': [{'pid': '23915', 'price': 1805.00, 'name': '2398 💎'}],
     '6042': [{'pid': '23916', 'price': 4512.50, 'name': '6042 💎'}],
-    'wp': [{'pid': '23906', 'price': 90.00, 'name': 'wp 💎'}],
-    'lukas': [{'pid': '23906', 'price': 47.45, 'name': 'lukas battle bounty💎'}],
-    'battlefordiscounts': [{'pid': '23906', 'price': 47.45, 'name': 'battlefordiscounts 💎'}],
+    'wp': [{'pid': '23922', 'price': 95.00, 'name': 'wp 💎'}],
+    'lukas': [{'pid': '25600', 'price': 47.45, 'name': 'lukas battle bounty💎'}],
+    'battlefordiscounts': [{'pid': '25601', 'price': 47.45, 'name': 'battlefordiscounts 💎'}],
 }
 
 # ==========================================
@@ -299,21 +299,20 @@ async def get_smile_balance(scraper, headers, balance_url='https://www.smile.one
 async def process_smile_one_order(game_id, zone_id, product_id, currency_name, prev_context=None):
     scraper = await get_main_scraper()
 
+    # 🟢 NEW: Query နှင့် Pay အစား Create Order ကို တိုက်ရိုက်သုံးမည်
     if currency_name == 'PH':
         main_url = 'https://www.smile.one/ph/merchant/mobilelegends'
         checkrole_url = 'https://www.smile.one/ph/merchant/mobilelegends/checkrole'
-        query_url = 'https://www.smile.one/ph/merchant/mobilelegends/query'
-        pay_url = 'https://www.smile.one/ph/merchant/mobilelegends/pay'
+        createorder_url = 'https://www.smile.one/ph/merchant/mobilelegends/createorder' # 🟢 Updated
         order_api_url = 'https://www.smile.one/ph/customer/activationcode/codelist'
     else:
         main_url = 'https://www.smile.one/merchant/mobilelegends'
         checkrole_url = 'https://www.smile.one/merchant/mobilelegends/checkrole'
-        query_url = 'https://www.smile.one/merchant/mobilelegends/query'
-        pay_url = 'https://www.smile.one/merchant/mobilelegends/pay'
+        createorder_url = 'https://www.smile.one/merchant/mobilelegends/createorder' # 🟢 Updated
         order_api_url = 'https://www.smile.one/customer/activationcode/codelist'
     
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'X-Requested-With': 'XMLHttpRequest', 
         'Referer': main_url, 
         'Origin': 'https://www.smile.one'
@@ -323,11 +322,9 @@ async def process_smile_one_order(game_id, zone_id, product_id, currency_name, p
         csrf_token = None
         ig_name = "Unknown"
         
-        # 🟢 Context ရှိနေပါက Token ကိုသာ ပြန်လည်အသုံးပြုမည် (Cloudflare မပိတ်စေရန်)
         if prev_context:
             csrf_token = prev_context.get('csrf_token')
 
-        # 🟢 Token မရှိမှသာ Main Page ကို ခေါ်မည်
         if not csrf_token:
             response = await asyncio.to_thread(scraper.get, main_url, headers=headers)
             if response.status_code in [403, 503] or "cloudflare" in response.text.lower():
@@ -340,9 +337,9 @@ async def process_smile_one_order(game_id, zone_id, product_id, currency_name, p
                 csrf_input = soup.find('input', {'name': '_csrf'})
                 if csrf_input: csrf_token = csrf_input.get('value')
 
-            if not csrf_token: return {"status": "error", "message": "CSRF Token not found. Add a new Cookie using /setcookie."}
+            if not csrf_token: return {"status": "error", "message": "CSRF Token not found. Re-add Cookie."}
 
-        # 🟢 ပစ္စည်းဝယ်တိုင်း Game ID အမြဲတမ်း ပြန်စစ်ဆေးမည် (prev_context ကာထားတာကို ဖြုတ်လိုက်ပါသည်)
+        # 🟢 Check Role (Account မှန်/မမှန် စစ်ဆေးခြင်း)
         check_data = {'user_id': game_id, 'zone_id': zone_id, '_csrf': csrf_token}
         role_response_raw = await asyncio.to_thread(scraper.post, checkrole_url, data=check_data, headers=headers)
         try:
@@ -353,32 +350,7 @@ async def process_smile_one_order(game_id, zone_id, product_id, currency_name, p
                 return {"status": "error", "message": f"❌ Invalid Account: {real_error}"}
         except Exception: return {"status": "error", "message": "Check Role API Error: Cannot verify account."}
 
-        # Query & Pay အပိုင်း
-        query_data = {'user_id': game_id, 'zone_id': zone_id, 'pid': product_id, 'checkrole': '', 'pay_methond': 'smilecoin', 'channel_method': 'smilecoin', '_csrf': csrf_token}
-        query_response_raw = await asyncio.to_thread(scraper.post, query_url, data=query_data, headers=headers)
-        
-        try: query_result = query_response_raw.json()
-        except Exception: return {"status": "error", "message": "Query API Error"}
-            
-        flowid = query_result.get('flowid') or query_result.get('data', {}).get('flowid')
-        
-        if not flowid:
-            real_error = query_result.get('msg') or query_result.get('message') or ""
-            if "login" in str(real_error).lower() or "unauthorized" in str(real_error).lower():
-                print("⚠️ Cookie expired. Starting Auto-Login...")
-                
-                await notify_owner("⚠️ <b>Order Alert:</b> Cookie သက်တမ်းကုန်သွားပါပြီ။ အော်ဒါဝယ်နေစဉ် Auto-login စတင်နေပါသည်...")
-
-                success = await auto_login_and_get_cookie()
-                
-                if success:
-                    await notify_owner("✅ <b>Success:</b> Auto-login အောင်မြင်ပါသည်။ Cookie အသစ်ရရှိပါပြီ။")
-                    return {"status": "error", "message": "Session renewed. Please enter the command again."}
-                else: 
-                    await notify_owner("❌ <b>Critical Alert:</b> Auto-login ဝင်ရောက်ခြင်း မအောင်မြင်ပါ။ `/setcookie` ဖြင့် Manual ပြန်ထည့်ပေးပါ။")
-                    return {"status": "error", "message": "❌ Auto-Login failed. Please provide /setcookie again."}
-            return {"status": "error", "message": "❌ **Invalid Account:**\nAccount is ban server."}
-
+        # 🟢 Check Last Order ID
         last_known_order_id = None
         try:
             pre_hist_raw = await asyncio.to_thread(scraper.get, order_api_url, params={'type': 'orderlist', 'p': '1', 'pageSize': '5'}, headers=headers)
@@ -390,17 +362,40 @@ async def process_smile_one_order(game_id, zone_id, product_id, currency_name, p
                         break
         except Exception: pass
 
-        pay_data = {'_csrf': csrf_token, 'user_id': game_id, 'zone_id': zone_id, 'pay_methond': 'smilecoin', 'product_id': product_id, 'channel_method': 'smilecoin', 'flowid': flowid, 'email': '', 'coupon_id': ''}
-        pay_response_raw = await asyncio.to_thread(scraper.post, pay_url, data=pay_data, headers=headers)
-        pay_text = pay_response_raw.text.lower()
+        # 🚀 🟢 NEW: Create Order တိုက်ရိုက်လုပ်ဆောင်ခြင်း (Query + Pay ၂ ဆင့် ပေါင်းထားသည်)
+        order_data = {
+            '_csrf': csrf_token,
+            'user_id': game_id,
+            'zone_id': zone_id,
+            'pid': product_id,
+            'pay_methond': 'smilecoin',
+            'channel_method': 'smilecoin'
+        }
         
-        if "saldo insuficiente" in pay_text or "insufficient" in pay_text:
+        create_res_raw = await asyncio.to_thread(scraper.post, createorder_url, data=order_data, headers=headers)
+        create_text = create_res_raw.text.lower()
+        
+        # Check Cookie Expiration
+        if "login" in create_text or "unauthorized" in create_text:
+            print("⚠️ Cookie expired. Starting Auto-Login...")
+            await notify_owner("⚠️ <b>Order Alert:</b> Cookie သက်တမ်းကုန်သွားပါပြီ။ အော်ဒါဝယ်နေစဉ် Auto-login စတင်နေပါသည်...")
+            success = await auto_login_and_get_cookie()
+            if success:
+                await notify_owner("✅ <b>Success:</b> Auto-login အောင်မြင်ပါသည်။ Cookie အသစ်ရရှိပါပြီ။")
+                return {"status": "error", "message": "Session renewed. Please enter the command again."}
+            else: 
+                await notify_owner("❌ <b>Critical Alert:</b> Auto-login မအောင်မြင်ပါ။ `/setcookie` ဖြင့် Manual ပြန်ထည့်ပေးပါ။")
+                return {"status": "error", "message": "❌ Auto-Login failed. Please provide /setcookie again."}
+                
+        # Check Balance
+        if "saldo insuficiente" in create_text or "insufficient" in create_text:
             return {"status": "error", "message": "Insufficient balance in the Main account."}
-        
+
         await asyncio.sleep(2) 
         real_order_id = "Not found"
         is_success = False
 
+        # 🟢 Validate Order via History
         try:
             hist_res_raw = await asyncio.to_thread(scraper.get, order_api_url, params={'type': 'orderlist', 'p': '1', 'pageSize': '5'}, headers=headers)
             hist_json = hist_res_raw.json()
@@ -417,45 +412,46 @@ async def process_smile_one_order(game_id, zone_id, product_id, currency_name, p
 
         if not is_success:
             try:
-                pay_json = pay_response_raw.json()
+                pay_json = create_res_raw.json()
                 code = str(pay_json.get('code', ''))
                 msg = str(pay_json.get('msg', '')).lower()
                 if code in ['200', '0', '1'] or 'success' in msg: is_success = True
             except:
-                if 'success' in pay_text or 'sucesso' in pay_text: is_success = True
+                if 'success' in create_text or 'sucesso' in create_text: is_success = True
 
         if is_success:
-            # 🟢 csrf_token ပါ ထည့်ပြန်ပေးလိုက်ပါမည်
             return {"status": "success", "ig_name": ig_name, "order_id": real_order_id, "csrf_token": csrf_token}
         else:
             err_msg = "Payment failed."
             try:
-                err_json = pay_response_raw.json()
+                err_json = create_res_raw.json()
                 if 'msg' in err_json: err_msg = f"Payment failed. ({err_json['msg']})"
             except: pass
             return {"status": "error", "message": err_msg}
 
     except Exception as e: return {"status": "error", "message": f"System Error: {str(e)}"}
 
+
+# ==========================================
 # 🌟 3.1 MAGIC CHESS SCRAPER FUNCTION
+# ==========================================
 async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_context=None):
     scraper = await get_main_scraper()
 
+    # 🟢 NEW: Query နှင့် Pay အစား Game/Create Order ကို တိုက်ရိုက်သုံးမည်
     if currency_name == 'PH':
         main_url = 'https://www.smile.one/ph/merchant/game/magicchessgogo'
         checkrole_url = 'https://www.smile.one/ph/merchant/game/checkrole'
-        query_url = 'https://www.smile.one/ph/merchant/game/query'
-        pay_url = 'https://www.smile.one/ph/merchant/game/pay'
+        createorder_url = 'https://www.smile.one/ph/merchant/game/createorder' # 🟢 Updated
         order_api_url = 'https://www.smile.one/ph/customer/activationcode/codelist'
     else:
         main_url = 'https://www.smile.one/merchant/game/magicchessgogo'
         checkrole_url = 'https://www.smile.one/merchant/game/checkrole'
-        query_url = 'https://www.smile.one/merchant/game/query'
-        pay_url = 'https://www.smile.one/merchant/game/pay'
+        createorder_url = 'https://www.smile.one/merchant/game/createorder' # 🟢 Updated
         order_api_url = 'https://www.smile.one/customer/activationcode/codelist'
     
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'X-Requested-With': 'XMLHttpRequest', 
         'Referer': main_url, 
         'Origin': 'https://www.smile.one'
@@ -465,7 +461,6 @@ async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_co
         csrf_token = None
         ig_name = "Unknown"
         
-        # 🟢 Context ရှိနေပါက Token ကိုသာ ပြန်လည်အသုံးပြုမည်
         if prev_context:
             csrf_token = prev_context.get('csrf_token')
 
@@ -481,9 +476,9 @@ async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_co
                 csrf_input = soup.find('input', {'name': '_csrf'})
                 if csrf_input: csrf_token = csrf_input.get('value')
 
-            if not csrf_token: return {"status": "error", "message": "CSRF Token not found. Add a new Cookie using /setcookie."}
+            if not csrf_token: return {"status": "error", "message": "CSRF Token not found. Re-add Cookie."}
 
-        # 🟢 Item တိုင်းအတွက် Game ID အမြဲတမ်း ပြန်စစ်ဆေးမည်
+        # 🟢 Check Role
         check_data = {'user_id': game_id, 'zone_id': zone_id, '_csrf': csrf_token}
         role_response_raw = await asyncio.to_thread(scraper.post, checkrole_url, data=check_data, headers=headers)
         try:
@@ -493,31 +488,7 @@ async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_co
                 return {"status": "error", "message": " Account not found."}
         except Exception: return {"status": "error", "message": "⚠️ Check Role API Error: Cannot verify account."}
 
-        # Query နဲ့ Pay အပိုင်း
-        query_data = {'user_id': game_id, 'zone_id': zone_id, 'pid': product_id, 'checkrole': '', 'pay_methond': 'smilecoin', 'channel_method': 'smilecoin', '_csrf': csrf_token}
-        query_response_raw = await asyncio.to_thread(scraper.post, query_url, data=query_data, headers=headers)
-        
-        try: query_result = query_response_raw.json()
-        except Exception: return {"status": "error", "message": "Query API Error"}
-            
-        flowid = query_result.get('flowid') or query_result.get('data', {}).get('flowid')
-        
-        if not flowid:
-            real_error = query_result.get('msg') or query_result.get('message') or ""
-            if "login" in str(real_error).lower() or "unauthorized" in str(real_error).lower():
-                print("⚠️ Cookie expired. Starting Auto-Login...")
-                await notify_owner("⚠️ <b>Order Alert:</b> Cookie သက်တမ်းကုန်သွားပါပြီ။ အော်ဒါဝယ်နေစဉ် Auto-login စတင်နေပါသည်...")
-
-                success = await auto_login_and_get_cookie()
-                
-                if success:
-                    await notify_owner("✅ <b>Success:</b> Auto-login အောင်မြင်ပါသည်။ Cookie အသစ်ရရှိပါပြီ။")
-                    return {"status": "error", "message": "Session renewed. Please enter the command again."}
-                else: 
-                    await notify_owner("❌ <b>Critical Alert:</b> Auto-login ဝင်ရောက်ခြင်း မအောင်မြင်ပါ။ `/setcookie` ဖြင့် Manual ပြန်ထည့်ပေးပါ။")
-                    return {"status": "error", "message": "❌ Auto-Login failed. Please provide /setcookie again."}
-            return {"status": "error", "message": "Invalid account or unable to purchase."}
-
+        # 🟢 Check Last Order ID
         last_known_order_id = None
         try:
             pre_hist_raw = await asyncio.to_thread(scraper.get, order_api_url, params={'type': 'orderlist', 'p': '1', 'pageSize': '5'}, headers=headers)
@@ -529,13 +500,34 @@ async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_co
                         break
         except Exception: pass
 
-        pay_data = {'_csrf': csrf_token, 'user_id': game_id, 'zone_id': zone_id, 'pay_methond': 'smilecoin', 'product_id': product_id, 'channel_method': 'smilecoin', 'flowid': flowid, 'email': '', 'coupon_id': ''}
-        pay_response_raw = await asyncio.to_thread(scraper.post, pay_url, data=pay_data, headers=headers)
-        pay_text = pay_response_raw.text.lower()
+        # 🚀 🟢 NEW: Game Create Order တိုက်ရိုက်လုပ်ဆောင်ခြင်း
+        order_data = {
+            '_csrf': csrf_token,
+            'user_id': game_id,
+            'zone_id': zone_id,
+            'pid': product_id,
+            'pay_methond': 'smilecoin',
+            'channel_method': 'smilecoin',
+            'game_id': 'magicchessgogo' # MCC အတွက် သေချာစေရန်
+        }
         
-        if "saldo insuficiente" in pay_text or "insufficient" in pay_text:
+        create_res_raw = await asyncio.to_thread(scraper.post, createorder_url, data=order_data, headers=headers)
+        create_text = create_res_raw.text.lower()
+        
+        if "login" in create_text or "unauthorized" in create_text:
+            print("⚠️ Cookie expired. Starting Auto-Login...")
+            await notify_owner("⚠️ <b>Order Alert:</b> Cookie သက်တမ်းကုန်သွားပါပြီ။ အော်ဒါဝယ်နေစဉ် Auto-login စတင်နေပါသည်...")
+            success = await auto_login_and_get_cookie()
+            if success:
+                await notify_owner("✅ <b>Success:</b> Auto-login အောင်မြင်ပါသည်။ Cookie အသစ်ရရှိပါပြီ။")
+                return {"status": "error", "message": "Session renewed. Please enter the command again."}
+            else: 
+                await notify_owner("❌ <b>Critical Alert:</b> Auto-login မအောင်မြင်ပါ။ `/setcookie` ဖြင့် Manual ပြန်ထည့်ပေးပါ။")
+                return {"status": "error", "message": "❌ Auto-Login failed. Please provide /setcookie again."}
+                
+        if "saldo insuficiente" in create_text or "insufficient" in create_text:
             return {"status": "error", "message": "Insufficient balance in the Main account."}
-        
+
         await asyncio.sleep(2) 
         real_order_id = "Not found"
         is_success = False
@@ -556,19 +548,19 @@ async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_co
 
         if not is_success:
             try:
-                pay_json = pay_response_raw.json()
+                pay_json = create_res_raw.json()
                 code = str(pay_json.get('code', ''))
                 msg = str(pay_json.get('msg', '')).lower()
                 if code in ['200', '0', '1'] or 'success' in msg: is_success = True
             except:
-                if 'success' in pay_text or 'sucesso' in pay_text: is_success = True
+                if 'success' in create_text or 'sucesso' in create_text: is_success = True
 
         if is_success:
             return {"status": "success", "ig_name": ig_name, "order_id": real_order_id, "csrf_token": csrf_token}
         else:
             err_msg = "Payment failed."
             try:
-                err_json = pay_response_raw.json()
+                err_json = create_res_raw.json()
                 if 'msg' in err_json: err_msg = f"Payment failed. ({err_json['msg']})"
             except: pass
             return {"status": "error", "message": err_msg}
@@ -1468,38 +1460,203 @@ async def handle_check_role(message: types.Message):
         await loading_msg.edit_text(f"❌ System Error: {str(e)}")
 
 
+###############################################
+# ==========================================
+# 🔍 1. DISPUTE & VERIFICATION COMMAND
+# ==========================================
+@dp.message(or_f(Command("checkcus"), F.text.regexp(r"(?i)^\.checkcus(?:$|\s+)")))
+async def check_official_customer(message: types.Message):
+    if message.from_user.id != OWNER_ID:
+        return await message.reply("❌ You are not authorized.")
+        
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        return await message.reply("⚠️ **Usage:** `.checkcus <Game_ID>`")
+        
+    game_id = parts[1]
+    loading_msg = await message.reply(f"🔍 Searching Official Record for Game ID: `{game_id}`...")
+    
+    scraper = await get_main_scraper()
+    headers = {'User-Agent': 'Mozilla/5.0', 'X-Requested-With': 'XMLHttpRequest', 'Origin': 'https://www.smile.one'}
+    url = 'https://www.smile.one/merchant/customer'
+    
+    try:
+        # 🟢 Smile.one ၏ Customer Search ကို လှမ်းခေါ်ခြင်း (Keyword ဖြင့် ရှာမည်ဟု ယူဆပါသည်)
+        params = {'keyword': game_id} # ဝက်ဘ်ဆိုက်၏ Search Parameter အစစ်ပေါ်မူတည်၍ အပြောင်းအလဲရှိနိုင်ပါသည်
+        res = await asyncio.to_thread(scraper.get, url, params=params, headers=headers, timeout=15)
+        
+        if "login" in res.url.lower():
+            return await loading_msg.edit_text("⚠️ **Cookie Expired.** Please `/setcookie`.")
+            
+        soup = BeautifulSoup(res.text, 'html.parser')
+        
+        # 🟢 HTML Table ထဲမှ Data ကို ဆွဲထုတ်ခြင်း
+        table = soup.find('table')
+        if not table:
+            return await loading_msg.edit_text(f"❌ No official records found for Game ID: {game_id}")
+            
+        rows = table.find_all('tr')[1:6] # နောက်ဆုံး ၅ ကြိမ်ကိုသာ ယူမည်
+        if not rows:
+            return await loading_msg.edit_text(f"📜 Game ID `{game_id}` has no successful transaction history on Official Smile.one.")
+            
+        report = f"🔍 **Official Records for {game_id}**\n\n"
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) >= 4:
+                # ဇယား၏ Column အစီအစဉ်အပေါ် မူတည်၍ Index (0, 1, 2) ပြောင်းလဲနိုင်သည်
+                date_str = cols[0].get_text(strip=True)
+                item_name = cols[2].get_text(strip=True)
+                status = cols[4].get_text(strip=True) if len(cols) > 4 else "Success"
+                report += f"📅 {date_str} | 💎 {item_name} | 📊 {status}\n"
+                
+        await loading_msg.edit_text(report)
+        
+    except Exception as e:
+        await loading_msg.edit_text(f"❌ Scrape Error: {str(e)}")
+        
+
+# ==========================================
+# 👑 2. VIP & TOP CUSTOMER COMMANDS
+# ==========================================
+@dp.message(or_f(Command("topcus"), F.text.regexp(r"(?i)^\.topcus$")))
+async def show_top_customers(message: types.Message):
+    if message.from_user.id != OWNER_ID: return await message.reply("❌ Only Owner.")
+    
+    top_spenders = await db.get_top_customers(limit=10)
+    if not top_spenders: return await message.reply("📜 No orders found in database.")
+    
+    report = "🏆 **Top 10 Customers (By Total Spent)** 🏆\n\n"
+    for i, user in enumerate(top_spenders, 1):
+        tg_id = user['_id']
+        spent = user['total_spent']
+        count = user['order_count']
+        
+        # Database ထဲမှာ VIP ဟုတ်မဟုတ် ပြန်စစ်မည်
+        user_info = await db.get_reseller(tg_id)
+        vip_tag = "🌟 [VIP]" if user_info and user_info.get('is_vip') else ""
+        
+        report += f"**{i}.** `ID: {tg_id}` {vip_tag}\n💰 Spent: ${spent:,.2f} ({count} Orders)\n\n"
+        
+    report += "💡 *Use `.setvip <ID>` to grant VIP status.*"
+    await message.reply(report)
+
+@dp.message(or_f(Command("setvip"), F.text.regexp(r"(?i)^\.setvip(?:$|\s+)")))
+async def grant_vip_status(message: types.Message):
+    if message.from_user.id != OWNER_ID: return await message.reply("❌ Only Owner.")
+    parts = message.text.strip().split()
+    if len(parts) < 2: return await message.reply("⚠️ **Usage:** `.setvip <User_ID>`")
+    
+    target_id = parts[1]
+    user = await db.get_reseller(target_id)
+    if not user: return await message.reply("❌ User not found.")
+    
+    current_status = user.get('is_vip', False)
+    new_status = not current_status # ရှိရင် ဖြုတ်မည်၊ မရှိရင် ပေးမည် (Toggle)
+    
+    await db.set_vip_status(target_id, new_status)
+    status_msg = "Granted 🌟" if new_status else "Revoked ❌"
+    await message.reply(f"✅ VIP Status for `{target_id}` has been **{status_msg}**.")
+
+
+# ==========================================
+# 📊 3. AUTO-RECONCILIATION TASK
+# ==========================================
+async def daily_reconciliation_task():
+    """ညစဉ် ၁၁:၅၀ မိနစ်တိုင်းတွင် Bot ၏ စာရင်းနှင့် Official စာရင်းကိုက်ညီမှု စစ်ဆေးမည်"""
+    while True:
+        now = datetime.datetime.now(MMT)
+        # ည ၁၁:၅၀ တွင် Run မည်
+        target_time = now.replace(hour=23, minute=50, second=0, microsecond=0)
+        if now >= target_time:
+            target_time += datetime.timedelta(days=1)
+            
+        wait_seconds = (target_time - now).total_seconds()
+        await asyncio.sleep(wait_seconds)
+        
+        print(f"[{datetime.datetime.now(MMT).strftime('%I:%M %p')}] 🔄 Running Daily Reconciliation...")
+        
+        try:
+            # 1. Bot ၏ Database မှ ယနေ့ Order အနှစ်ချုပ်ကို ယူမည်
+            db_summary = await db.get_today_orders_summary()
+            db_total_spent = db_summary['total_spent']
+            db_order_count = db_summary['total_orders']
+            
+            # 2. Official Smile.one မှ ယူရန် (Scrape or use /customer/order history)
+            # အကယ်၍ Official က Scrape လုပ်၍မရပါက Local စာရင်းကိုသာ Report ပို့မည်
+            scraper = await get_main_scraper()
+            headers = {'X-Requested-With': 'XMLHttpRequest', 'Origin': 'https://www.smile.one'}
+            balances = await get_smile_balance(scraper, headers)
+            
+            report = (
+                "📊 **Daily Reconciliation Report** 📊\n\n"
+                "**1. Bot System (V-Wallet) Records:**\n"
+                f"🔹 Total Orders Today: `{db_order_count}`\n"
+                f"🔹 Total Spent Today: `${db_total_spent:,.2f}`\n\n"
+                "**2. Official Smile.one Balances:**\n"
+                f"🇧🇷 BR: `${balances.get('br_balance', 0.0):,.2f}`\n"
+                f"🇵🇭 PH: `${balances.get('ph_balance', 0.0):,.2f}`\n\n"
+                "*(Please verify if the balances align with your expected expenses.)*"
+            )
+            
+            await notify_owner(report)
+            
+        except Exception as e:
+            print(f"Reconciliation Error: {e}")
+
+
+##############################################
+
 # ==========================================
 # ℹ️ HELP & START COMMANDS
 # ==========================================
 @dp.message(or_f(Command("help"), F.text.regexp(r"(?i)^\.help$")))
 async def send_help_message(message: types.Message):
     is_owner = (message.from_user.id == OWNER_ID)
+    
     help_text = (
-        f"<b>🤖 𝐁𝐎𝐓 𝐂𝐎𝐌𝐌𝐀𝐍𝐃𝐒 𝐌𝐄𝐍𝐔</b>\n━━━━━━━━━━━━━━━━\n\n"
-        f"<b>💎 𝐌𝐋𝐁Ｂ 𝐃𝐢𝐚𝐦𝐨𝐧𝐝𝐬</b>\n"
+        f"<b>🤖 𝐁𝐎𝐓 𝐂𝐎𝐌𝐌𝐀𝐍𝐃𝐒 𝐌𝐄𝐍𝐔</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>💎 𝐌𝐋𝐁Ｂ 𝐃𝐢𝐚𝐦𝐨𝐧𝐝𝐬 (ဝယ်ယူရန်)</b>\n"
         f"🇧🇷 BR MLBB: <code>msc/mlb/br/b ID (Zone) Pack</code>\n"
         f"🇵🇭 PH MLBB: <code>mlp/ph/p ID (Zone) Pack</code>\n\n"
-        f"<b>♟️ 𝐌𝐚𝐠𝐢𝐜 𝐂𝐡𝐞𝐬𝐬</b>\n"
+        f"<b>♟️ 𝐌𝐚𝐠𝐢𝐜 𝐂𝐡𝐞𝐬𝐬 (ဝယ်ယူရန်)</b>\n"
         f"🇧🇷 BR MCC: <code>mcc/mcb ID (Zone) Pack</code>\n"
         f"🇵🇭 PH MCC: <code>mcp ID (Zone) Pack</code>\n"
-        f"━━━━━━━━━━━━━━━━\n\n"
-        f"<b>👤 𝐔𝐬𝐞𝐫 𝐓𝐨𝐨𝐥𝐬</b>\n"
-        f"🔹 <code>.balance</code>  : Check Wallet Balance\n"
-        f"🔹 <code>.his</code>      : View Order History\n"
-        f"🔹 <code>.clean</code>    : Clear History\n"
-        f"🔹 <code>.listb</code>     : View BR Price List\n"
-        f"🔹 <code>.listp</code>     : View PH Price List\n"
-        f"🔹 <code>.listmb</code>    : View MCC Price List\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>👤 𝐔𝐬𝐞𝐫 𝐓𝐨𝐨𝐥𝐬 (အသုံးပြုသူများအတွက်)</b>\n"
+        f"🔹 <code>.bal</code>      : မိမိ Wallet Balance စစ်ရန်\n"
+        f"🔹 <code>.role</code>     : Game ID နှင့် Region စစ်ရန်\n"
+        f"🔹 <code>.his</code>      : မိမိဝယ်ယူခဲ့သော မှတ်တမ်းကြည့်ရန်\n"
+        f"🔹 <code>.clean</code>    : မှတ်တမ်းများ ဖျက်ရန်\n"
+        f"🔹 <code>.listb</code>     : BR ဈေးနှုန်းစာရင်း ကြည့်ရန်\n"
+        f"🔹 <code>.listp</code>     : PH ဈေးနှုန်းစာရင်း ကြည့်ရန်\n"
+        f"🔹 <code>.listmb</code>    : MCC ဈေးနှုန်းစာရင်း ကြည့်ရန်\n"
+        f"💡 <i>Tip: 50+50 ဟုရိုက်ထည့်၍ ဂဏန်းပေါင်းစက်အဖြစ် သုံးနိုင်ပါသည်။</i>\n"
     )
+    
+    # 🟢 Owner အတွက်သာ ပေါ်မည့် သီးသန့် Command များ
     if is_owner:
         help_text += (
-            f"\n<b>👑 𝐎𝐰𝐧𝐞𝐫 𝐂𝐨𝐦𝐦𝐚𝐧𝐝𝐬</b>\n"
-            f"🔸 <code>/add ID</code>    : Add User\n"
-            f"🔸 <code>/remove ID</code> : Remove User\n"
-            f"🔸 <code>/users</code>       : User List\n"
-            f"🔸 <code>/setcookie</code> : Update Cookie\n"
+            f"\n━━━━━━━━━━━━━━━━━━━━\n"
+            f"<b>👑 𝐎𝐰𝐧𝐞𝐫 𝐓𝐨𝐨𝐥𝐬 (Admin သီးသန့်)</b>\n\n"
+            f"<b>👥 ယူဆာစီမံခန့်ခွဲမှု</b>\n"
+            f"🔸 <code>.add ID</code>    : User အသစ်ထည့်ရန်\n"
+            f"🔸 <code>.remove ID</code> : User အား ဖယ်ရှားရန်\n"
+            f"🔸 <code>.users</code>     : User စာရင်းအားလုံး ကြည့်ရန်\n\n"
+            f"<b>💰 ဘာလန်း နှင့် ငွေဖြည့်</b>\n"
+            f"🔸 <code>.addbal ID 50 BR</code>  : Balance ပေါင်းထည့်ရန်\n"
+            f"🔸 <code>.deduct ID 50 BR</code>  : Balance နှုတ်ယူရန်\n"
+            f"🔸 <code>.topup Code</code>       : Smile Code ဖြည့်သွင်းရန်\n\n"
+            f"<b>💼 VIP နှင့် စာရင်းစစ်</b>\n"
+            f"🔸 <code>.checkcus ID</code> : Official မှတ်တမ်း လှမ်းစစ်ရန်\n"
+            f"🔸 <code>.topcus</code>      : ငွေအများဆုံးသုံးထားသူများ ကြည့်ရန်\n"
+            f"🔸 <code>.setvip ID</code>   : VIP အဖြစ် သတ်မှတ်ရန်/ဖြုတ်ရန်\n\n"
+            f"<b>⚙️ System Setup</b>\n"
+            f"🔸 <code>.cookies</code>    : Cookie အခြေအနေ စစ်ဆေးရန်\n"
+            f"🔸 <code>/setcookie</code>  : Main Cookie အသစ်ပြောင်းရန်\n"
         )
-    help_text += f"━━━━━━━━━━━━━━━━"
+        
+    help_text += f"\n━━━━━━━━━━━━━━━━━━━━"
     await message.reply(help_text, parse_mode=ParseMode.HTML)
 
 @dp.message(Command("start"))
@@ -1564,6 +1721,7 @@ async def main():
     # Background Tasks များကို Event Loop ပေါ်တင်ပေးခြင်း
     asyncio.create_task(keep_cookie_alive())
     asyncio.create_task(schedule_daily_cookie_renewal())
+    asyncio.create_task(daily_reconciliation_task())
     
     # Database Initialization
     await db.setup_indexes()
@@ -1575,5 +1733,5 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
-    # 🟢 Main Async Function ကို run ခြင်း (ဤနည်းလမ်းက အသန့်ရှင်းဆုံးဖြစ်ပါသည်)
+    
     asyncio.run(main())
