@@ -1736,19 +1736,22 @@ async def daily_reconciliation_task():
 
 
 
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+import re
+
 # ==========================================
-# 📋 AUTO FORMAT & COPY BUTTON (ID & ZONE)
+# 📋 AUTO FORMAT & COPY BUTTON (ID & ZONE) - UPDATED
 # ==========================================
-# 🟢 ဂဏန်း (ဂဏန်း) ဂဏန်း ပုံစံမျိုး လာသမျှကို အလိုအလျောက် ဖမ်းယူမည်
-@dp.message(F.text.regexp(r"^\d+\s*\(\d+\).*"))
+# 🟢 ဂဏန်းများကြားတွင် () ပါသည်ဖြစ်စေ၊ မပါသည်ဖြစ်စေ ဖမ်းယူမည် (ဥပမာ - 12345 (123) သို့မဟုတ် 12345 123)
+@dp.message(F.text.regexp(r"^\d+\s*\(?\d+\)?.*"))
 async def format_and_copy_text(message: types.Message):
-    # 🟢 User ပို့လိုက်သော စာသားကို အတိအကျ ယူမည် (ရှေ့က Emoji လုံးဝမထည့်ပါ)
+    # 🟢 User ပို့လိုက်သော စာသားကို အတိအကျ ယူမည် (Emoji များ မထည့်ပါ)
     raw_text = message.text.strip()
     
     # 🟢 ဖုန်းပေါ်တွင် စာသားကို တစ်ချက်နှိပ်ရုံဖြင့် Copy ကူးနိုင်ရန် <code>...</code> ဖြင့် ပိတ်ပေးမည်
     formatted_text = f"<code>{raw_text}</code>"
     
-    # 🟢 Copy  Button ဖန်တီးခြင်း (Telegram Bot API အသစ်ပါ CopyTextButton ကို သုံးထားပါသည်)
+    # 🟢 Copy 🤍 Button ဖန်တီးခြင်း
     try:
         from aiogram.types import CopyTextButton
         copy_btn = InlineKeyboardButton(
@@ -1756,7 +1759,7 @@ async def format_and_copy_text(message: types.Message):
             copy_text=CopyTextButton(text=raw_text)
         )
     except ImportError:
-        # 💡 အကယ်၍ Aiogram Version အဟောင်းဖြစ်နေပါက Fallback အနေဖြင့် သုံးရန်
+        # 💡 Aiogram Version အဟောင်းဖြစ်နေပါက Fallback
         copy_btn = InlineKeyboardButton(text="ᴄᴏᴘʏ", switch_inline_query=raw_text)
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[copy_btn]])
