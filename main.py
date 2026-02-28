@@ -1513,7 +1513,7 @@ async def handle_check_role(message: types.Message):
 
 
 # ==========================================
-# 🔍 1. DISPUTE & VERIFICATION COMMAND (OWNER + RESELLERS)
+# 🔍 1. DISPUTE & VERIFICATION COMMAND (GAME ID + ORDER ID SEARCH)
 # ==========================================
 import datetime 
 
@@ -1521,19 +1521,19 @@ import datetime
 async def check_official_customer(message: types.Message):
     tg_id = str(message.from_user.id)
     
-    # 🟢 Owner သို့မဟုတ် .add ဖြင့် စာရင်းသွင်းထားသော Reseller ဖြစ်မဖြစ် စစ်ဆေးခြင်း
     is_owner = (message.from_user.id == OWNER_ID)
-    user_data = await db.get_reseller(tg_id) # အကယ်၍ သင့် DB တွင် get_user ဟု သုံးထားပါက အမည်ပြောင်းပေးပါ
+    user_data = await db.get_reseller(tg_id) 
     
     if not is_owner and not user_data:
         return await message.reply("❌ You are not authorized. Only registered users can use this command.")
         
     parts = message.text.strip().split()
     if len(parts) < 2:
-        return await message.reply("⚠️ <b>Usage:</b> <code>.cus &lt;Game_ID&gt;</code>", parse_mode=ParseMode.HTML)
+        return await message.reply("⚠️ <b>Usage:</b> <code>.cus <Game_ID></code> သို့မဟုတ် <code>.cus <Order_ID></code>", parse_mode=ParseMode.HTML)
         
-    game_id = parts[1]
-    loading_msg = await message.reply(f"Searching Official Records for Game ID: <code>{game_id}</code>...", parse_mode=ParseMode.HTML)
+    # 🟢 Game ID ဖြစ်စေ၊ Order ID ဖြစ်စေ လက်ခံမည်
+    search_query = parts[1]
+    loading_msg = await message.reply(f"Deep Searching Official Records for: <code>{search_query}</code>...", parse_mode=ParseMode.HTML)
     
     scraper = await get_main_scraper()
     headers = {'X-Requested-With': 'XMLHttpRequest', 'Origin': 'https://www.smile.one'}
@@ -1548,7 +1548,7 @@ async def check_official_customer(message: types.Message):
     
     try:
         for api_url in urls_to_check:
-            for page_num in range(1, 33): 
+            for page_num in range(1, 11): 
                 res = await asyncio.to_thread(
                     scraper.get, api_url, 
                     params={'type': 'orderlist', 'p': str(page_num), 'pageSize': '50'}, 
@@ -1559,10 +1559,11 @@ async def check_official_customer(message: types.Message):
                     if 'list' in data and isinstance(data['list'], list) and len(data['list']) > 0:
                         for order in data['list']:
                             current_user_id = str(order.get('user_id') or order.get('role_id') or '')
+                            order_id = str(order.get('increment_id') or order.get('id') or '')
                             status_val = str(order.get('order_status', '') or order.get('status', '')).lower()
                             
-                            if current_user_id == str(game_id) and status_val in ['success', '1']:
-                                order_id = str(order.get('increment_id') or order.get('id') or '')
+                            # 🟢 ရှာဖွေသည့်စာသားသည် Game ID နှင့်ဖြစ်စေ၊ Order ID နှင့်ဖြစ်စေ ကိုက်ညီမှုရှိမရှိ နှစ်မျိုးလုံး စစ်ဆေးမည်
+                            if (current_user_id == search_query or order_id == search_query) and status_val in ['success', '1']:
                                 if order_id not in seen_ids:
                                     seen_ids.add(order_id)
                                     found_orders.append(order)
@@ -1572,11 +1573,11 @@ async def check_official_customer(message: types.Message):
                     break
                 
         if not found_orders:
-            return await loading_msg.edit_text(f"❌ No successful records found for Game ID: <code>{game_id}</code> in recent transactions.", parse_mode=ParseMode.HTML)
+            return await loading_msg.edit_text(f"❌ No successful records found for: <code>{search_query}</code> in recent transactions.", parse_mode=ParseMode.HTML)
             
-        found_orders = found_orders[:2] 
+        found_orders = found_orders[:1] 
         
-        report = f"🎉 <b>Oғғɪᴄɪᴀʟ Rᴇᴄᴏʀᴅs ғᴏʀ{game_id}</b>\n\n"
+        report = f"🔍 <b>Official Records for {search_query}</b>\n\n"
         
         for order in found_orders:
             serial_id = str(order.get('increment_id') or order.get('id') or 'Unknown Serial')
@@ -1626,7 +1627,6 @@ async def check_official_customer(message: types.Message):
                 
             raw_item_name = raw_item_name.strip()
             
-            # 🟢 ငွေကြေးအမျိုးအစားအလိုက် Prefix ပြောင်းပေးခြင်း
             if currency_sym == 'PHP':
                 final_item_name = f"Mobile Legends PH - {raw_item_name}"
             else:
@@ -1735,32 +1735,62 @@ async def daily_reconciliation_task():
             print(f"Reconciliation Error: {e}")
 
 
-
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-import re
-
 # ==========================================
-# 📋 AUTO FORMAT & COPY BUTTON (ID & ZONE) - UPDATED
+# 📋 AUTO FORMAT & COPY BUTTON (SMART WP FIX)
 # ==========================================
-# 🟢 ဂဏန်းများကြားတွင် () ပါသည်ဖြစ်စေ၊ မပါသည်ဖြစ်စေ ဖမ်းယူမည် (ဥပမာ - 12345 (123) သို့မဟုတ် 12345 123)
 @dp.message(F.text.regexp(r"^\d+\s*\(?\d+\)?.*"))
 async def format_and_copy_text(message: types.Message):
-    # 🟢 User ပို့လိုက်သော စာသားကို အတိအကျ ယူမည် (Emoji များ မထည့်ပါ)
     raw_text = message.text.strip()
     
+    # 🟢 Regex ကိုသုံး၍ Player ID, Zone ID နှင့် နောက်ဆက်တွဲစာသားတို့ကို အပိုင်း ၃ ပိုင်း ခွဲထုတ်မည်
+    match = re.match(r"^(\d+)\s*\(?(\d+)\)?\s*(.*)$", raw_text)
+    
+    if match:
+        player_id = match.group(1)
+        zone_id = match.group(2)
+        suffix = match.group(3).strip() 
+        
+        # 🟢 နောက်ဆက်တွဲစာသား (Suffix) ကို Smart ဖြစ်အောင် ပြုပြင်မည်
+        if suffix:
+            # အက္ခရာအသေးပြောင်းပြီး Space များကို ဖယ်ရှားမည်
+            clean_suffix = suffix.lower().replace(" ", "")
+            
+            # wp နှင့် ဂဏန်းများ တွဲနေသလား (ဥပမာ - 1wp, wp2, 10wp) စစ်ဆေးမည်
+            wp_match = re.match(r"^(\d*)wp(\d*)$", clean_suffix)
+            
+            if wp_match:
+                # ရှေ့ကဂဏန်းနှင့် နောက်ကဂဏန်းကို ယူမည်
+                num_str = wp_match.group(1) + wp_match.group(2)
+                
+                # 1wp သို့မဟုတ် wp1 သို့မဟုတ် wp ပဲဆိုလျှင် "wp" လို့ပဲထားမည်
+                if num_str == "" or num_str == "1":
+                    processed_suffix = "wp"
+                else:
+                    # 2wp, 10wp စသည်တို့ဆိုလျှင် "wp2", "wp10" ပုံစံပြောင်းမည်
+                    processed_suffix = f"wp{num_str}"
+            else:
+                # wp မဟုတ်သော တခြားစာသား (ဥပမာ - 1049) ဆိုလျှင် မူလအတိုင်းထားမည်
+                processed_suffix = suffix 
+                
+            formatted_raw = f"{player_id} ({zone_id}) {processed_suffix}"
+        else:
+            formatted_raw = f"{player_id} ({zone_id})"
+    else:
+        # လွဲချော်သွားပါက မူလစာသားအတိုင်း ထားမည်
+        formatted_raw = raw_text
+
     # 🟢 ဖုန်းပေါ်တွင် စာသားကို တစ်ချက်နှိပ်ရုံဖြင့် Copy ကူးနိုင်ရန် <code>...</code> ဖြင့် ပိတ်ပေးမည်
-    formatted_text = f"<code>{raw_text}</code>"
+    formatted_text = f"<code>{formatted_raw}</code>"
     
     # 🟢 Copy 🤍 Button ဖန်တီးခြင်း
     try:
         from aiogram.types import CopyTextButton
         copy_btn = InlineKeyboardButton(
             text="ᴄᴏᴘʏ",
-            copy_text=CopyTextButton(text=raw_text)
+            copy_text=CopyTextButton(text=formatted_raw)
         )
     except ImportError:
-        # 💡 Aiogram Version အဟောင်းဖြစ်နေပါက Fallback
-        copy_btn = InlineKeyboardButton(text="ᴄᴏᴘʏ", switch_inline_query=raw_text)
+        copy_btn = InlineKeyboardButton(text="ᴄᴏᴘʏ", switch_inline_query=formatted_raw)
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[copy_btn]])
     
@@ -1779,14 +1809,14 @@ async def send_help_message(message: types.Message):
     
     help_text = (
         f"<b>🤖 𝐁𝐎𝐓 𝐂𝐎𝐌𝐌𝐀𝐍𝐃𝐒 𝐌𝐄𝐍𝐔</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"━━━━━━━━━━━━━━━━━\n\n"
         f"<b>💎 𝐌𝐋𝐁Ｂ 𝐃𝐢𝐚𝐦𝐨𝐧𝐝𝐬 (ဝယ်ယူရန်)</b>\n"
         f"🇧🇷 BR MLBB: <code>msc/mlb/br/b ID (Zone) Pack</code>\n"
         f"🇵🇭 PH MLBB: <code>mlp/ph/p ID (Zone) Pack</code>\n\n"
         f"<b>♟️ 𝐌𝐚𝐠𝐢𝐜 𝐂𝐡𝐞𝐬𝐬 (ဝယ်ယူရန်)</b>\n"
         f"🇧🇷 BR MCC: <code>mcc/mcb ID (Zone) Pack</code>\n"
         f"🇵🇭 PH MCC: <code>mcp ID (Zone) Pack</code>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"━━━━━━━━━━━━━━━━━\n\n"
         f"<b>👤 𝐔𝐬𝐞𝐫 𝐓𝐨𝐨𝐥𝐬 (အသုံးပြုသူများအတွက်)</b>\n"
         f"🔹 <code>.bal</code>      : မိမိ Wallet Balance စစ်ရန်\n"
         f"🔹 <code>.role</code>     : Game ID နှင့် Region စစ်ရန်\n"
@@ -1801,7 +1831,7 @@ async def send_help_message(message: types.Message):
     # 🟢 Owner အတွက်သာ ပေါ်မည့် သီးသန့် Command များ
     if is_owner:
         help_text += (
-            f"\n━━━━━━━━━━━━━━━━━━━━\n"
+            f"\n━━━━━━━━━━━━━━━━━\n"
             f"<b>👑 𝐎𝐰𝐧𝐞𝐫 𝐓𝐨𝐨𝐥𝐬 (Admin သီးသန့်)</b>\n\n"
             f"<b>👥 ယူဆာစီမံခန့်ခွဲမှု</b>\n"
             f"🔸 <code>.add ID</code>    : User အသစ်ထည့်ရန်\n"
@@ -1820,7 +1850,7 @@ async def send_help_message(message: types.Message):
             f"🔸 <code>/setcookie</code>  : Main Cookie အသစ်ပြောင်းရန်\n"
         )
         
-    help_text += f"\n━━━━━━━━━━━━━━━━━━━━"
+    help_text += f"\n━━━━━━━━━━━━━━━━━"
     await message.reply(help_text, parse_mode=ParseMode.HTML)
 
 @dp.message(Command("start"))
