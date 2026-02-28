@@ -1512,7 +1512,7 @@ async def handle_check_role(message: types.Message):
 
 
 # ==========================================
-# 🔍 1. DISPUTE & VERIFICATION COMMAND (DEEP SEARCH - 150 ORDERS)
+# 🔍 1. DISPUTE & VERIFICATION COMMAND (SUCCESS ONLY + MM TIME)
 # ==========================================
 @dp.message(or_f(Command("checkcus"), Command("cus"), F.text.regexp(r"(?i)^\.(?:checkcus|cus)(?:$|\s+)")))
 async def check_official_customer(message: types.Message):
@@ -1535,11 +1535,12 @@ async def check_official_customer(message: types.Message):
     ]
     
     found_orders = []
+    seen_ids = set() # 🟢 အော်ဒါထပ်နေတာတွေ (Duplicates) ကို ဖယ်ရှားရန်
+    import datetime # Timezone တွက်ရန် လိုအပ်ပါသည်
     
     try:
         for api_url in urls_to_check:
-            # 🟢 Page 1 မှ 3 အထိ (စုစုပေါင်း အော်ဒါ ၅၀၀) လိုက်ရှာပါမည်
-            for page_num in range(1, 11):
+            for page_num in range(1, 11): # စာမျက်နှာ ၁၀ မျက်နှာစာ (အော်ဒါ ၅၀၀)
                 res = await asyncio.to_thread(
                     scraper.get, api_url, 
                     params={'type': 'orderlist', 'p': str(page_num), 'pageSize': '50'}, 
@@ -1550,39 +1551,61 @@ async def check_official_customer(message: types.Message):
                     if 'list' in data and isinstance(data['list'], list) and len(data['list']) > 0:
                         for order in data['list']:
                             current_user_id = str(order.get('user_id') or order.get('role_id') or '')
-                            if current_user_id == str(game_id):
-                                found_orders.append(order)
+                            status_val = str(order.get('order_status', '') or order.get('status', '')).lower()
+                            
+                            # 🟢 ⚠️ "Sucesso" များကို လျစ်လျူရှုပြီး "Success" ဖြစ်သော အော်ဒါများကိုသာ ရွေးချယ်မည်
+                            if current_user_id == str(game_id) and status_val in ['success', '1']:
+                                order_id = str(order.get('increment_id') or order.get('id') or '')
+                                # 🟢 Serial ID ထပ်နေတာတွေကို တစ်ခါပဲ ယူမည်
+                                if order_id not in seen_ids:
+                                    seen_ids.add(order_id)
+                                    found_orders.append(order)
                     else:
-                        break # ဒီ Page မှာ Data မရှိတော့ရင် နောက် Page ကို ဆက်မရှာတော့ပါ
+                        break 
                 except:
                     break
                 
         if not found_orders:
-            return await loading_msg.edit_text(f"❌ No official records found for Game ID: <code>{game_id}</code> in recent 500 transactions.", parse_mode=ParseMode.HTML)
+            return await loading_msg.edit_text(f"❌ No successful records found for Game ID: <code>{game_id}</code> in recent transactions.", parse_mode=ParseMode.HTML)
             
-        found_orders = found_orders[:5] # တွေ့သမျှထဲက နောက်ဆုံး ၅ ခုကိုပဲ ပြမည်
+        found_orders = found_orders[:10] # နောက်ဆုံး ၅ ခုကိုသာ ပြမည်
         
         report = f"🔍 <b>Official Records for {game_id}</b>\n\n"
         
         for order in found_orders:
             serial_id = str(order.get('increment_id') or order.get('id') or 'Unknown Serial')
-            date_str = str(order.get('created_at') or order.get('updated_at') or order.get('create_time') or order.get('insert_time') or order.get('add_time') or order.get('pay_time') or 'Unknown Date')
+            date_str = str(order.get('created_at') or order.get('updated_at') or order.get('create_time') or order.get('insert_time') or order.get('add_time') or order.get('pay_time') or '')
+            currency_sym = str(order.get('total_fee_currency') or '$')
+            
+            # 🟢 မြန်မာစံတော်ချိန် (MM Time) သို့ အလိုအလျောက် တွက်ချက်ပြောင်းလဲခြင်း
+            date_display = date_str
+            if date_str:
+                try:
+                    dt_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+                    
+                    # Brazil (UTC-3) မှ မြန်မာ (UTC+6:30) သို့ ကွာခြားချက် (+၉ နာရီခွဲ) ပေါင်းထည့်သည်
+                    if currency_sym == 'BRL':
+                        mmt_dt = dt_obj + datetime.timedelta(hours=9, minutes=30)
+                    # Philippines (UTC+8) မှ မြန်မာ (UTC+6:30) သို့ ကွာခြားချက် (-၁ နာရီခွဲ) နုတ်သည်
+                    elif currency_sym == 'PHP':
+                        mmt_dt = dt_obj - datetime.timedelta(hours=1, minutes=30)
+                    else:
+                        mmt_dt = dt_obj + datetime.timedelta(hours=9, minutes=30)
+                        
+                    mm_time_str = mmt_dt.strftime("%I:%M %p") # ဥပမာ - 12:30 PM
+                    date_display = f"{date_str} ( MM - {mm_time_str} )"
+                except Exception:
+                    date_display = date_str # Error တက်ပါက မူလအချိန်ကိုသာပြမည်
+
             item_name = str(order.get('product_name') or order.get('goods_name') or order.get('goods_title') or order.get('title') or order.get('name') or 'Unknown Item')
             price = str(order.get('price') or order.get('grand_total') or order.get('transaction_amount') or order.get('real_money') or order.get('pay_amount') or order.get('money') or order.get('amount') or order.get('total_amount') or '0.00')
             
-            currency_sym = str(order.get('total_fee_currency') or '$')
             if currency_sym != '$':
                 price_display = f"{price} {currency_sym}"
             else:
                 price_display = f"${price}"
-
-            status_val = str(order.get('order_status', '') or order.get('status', '')).lower()
-            if status_val in ['success', '1']:
-                status = "✅ Success"
-            else:
-                status = f"⚠️ {status_val.capitalize()}"
                 
-            report += f"🏷 <code>{serial_id}</code>\n📅 <code>{date_str}</code>\n💎 {item_name} ({price_display})\n📊 Status: {status}\n\n"
+            report += f"🏷 <code>{serial_id}</code>\n📅 <code>{date_display}</code>\n💎 {item_name} ({price_display})\n📊 Status: ✅ Success\n\n"
             
         await loading_msg.edit_text(report, parse_mode=ParseMode.HTML)
         
