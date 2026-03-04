@@ -784,8 +784,8 @@ async def handle_topup(message: types.Message):
                 else:
                     if added_amount >= 10000: fee_percent = 0.10
                     elif added_amount >= 5000: fee_percent = 0.15
-                    elif added_amount >= 1000: fee_percent = 0.20
-                    else: fee_percent = 0.30
+                    elif added_amount >= 1000: fee_percent = 0.2
+                    else: fee_percent = 0.3
 
                 fee_amount = round(added_amount * (fee_percent / 100), 2)
                 net_added = round(added_amount - fee_amount, 2)
@@ -926,7 +926,7 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
         user_v_bal = user_wallet.get(v_bal_key, 0.0) if user_wallet else 0.0
             
         start_time = time.time()
-        loading_msg = await message.reply(f"Order processing[ {len(parsed_orders)} | 0 ] ● ᥫ᭡")
+        loading_msg = await message.reply(f"Order processing [ {len(parsed_orders)} | 0 ] ● ᥫ᭡")
 
         current_v_bal = [user_v_bal] 
 
