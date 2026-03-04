@@ -169,7 +169,7 @@ BR_PACKAGES = {
     '172': [{'pid': '23', 'price': 122.0, 'name': '172 💎'}],
     '257': [{'pid': '25', 'price': 177.5, 'name': '257 💎'}],
     '343': [{'pid': '13', 'price': 61.5, 'name': '86 💎'}, {'pid': '25', 'price': 177.5, 'name': '257 💎'}],
-    '429': [{'pid': '23', 'price': 122.0, 'name': '86 💎'}, {'pid': '25', 'price': 177.5, 'name': '257 💎'}],
+    '429': [{'pid': '23', 'price': 122.0, 'name': '172 💎'}, {'pid': '25', 'price': 177.5, 'name': '257 💎'}],
     '514': [{'pid': '25', 'price': 177.5, 'name': '257 💎'}, {'pid': '25', 'price': 177.5, 'name': '257 💎'}],
     '600': [{'pid': '13', 'price': 61.5, 'name': '86 💎'}, {'pid': '25', 'price': 177.5, 'name': '257 💎'}, {'pid': '25', 'price': 177.5, 'name': '257 💎'}],
     '706': [{'pid': '26', 'price': 480.0, 'name': '706 💎'}],
@@ -771,10 +771,10 @@ async def handle_topup(message: types.Message):
             else:
                 if user_id_int == OWNER_ID: fee_percent = 0.0
                 else:
-                    if added_amount >= 10000: fee_percent = 0.0
-                    elif added_amount >= 5000: fee_percent = 0.0
-                    elif added_amount >= 1000: fee_percent = 0.0
-                    else: fee_percent = 0.0
+                    if added_amount >= 10000: fee_percent = 0.10
+                    elif added_amount >= 5000: fee_percent = 0.15
+                    elif added_amount >= 1000: fee_percent = 0.20
+                    else: fee_percent = 0.30
 
                 fee_amount = round(added_amount * (fee_percent / 100), 2)
                 net_added = round(added_amount - fee_amount, 2)
@@ -856,10 +856,6 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
             line = line.strip()
             if not line: continue 
             
-            # 🟢 ကွင်းအပိတ် ')' ၏ အနောက်တွင် Space မပါခဲ့လျှင် အလိုအလျောက် ခြားပေးမည့်အပိုင်း
-            import re
-            line = re.sub(r'\)\s*', ') ', line)
-            
             match = re.search(regex_pattern, line)
             if not match:
                 await message.reply(f"Invalid format: `{line}`\nCheck /help for correct format.")
@@ -885,7 +881,11 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                         active_packages = packages_dict
                         
                 if active_packages: 
-                    items_to_buy.extend(active_packages[pkg])
+                    # 🟢 Package ခွဲဝယ်သော်လည်း မူရင်းနာမည် (ဥပမာ 429) ကို မှတ်ထားမည်
+                    for item_dict in active_packages[pkg]:
+                        new_item = item_dict.copy()
+                        new_item['pkg_name'] = pkg.upper() 
+                        items_to_buy.append(new_item)
                 else: 
                     not_found_pkgs.append(pkg)
                     
@@ -917,7 +917,7 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
 
         async def process_order_line(order):
             game_id = order['game_id']
-            zone_id = order['zone_id']
+            zone_id = order['order_zone'] if 'order_zone' in order else order['zone_id']
             raw_items_str = order['raw_items_str']
             items_to_buy = order['items_to_buy']
             
@@ -936,19 +936,34 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                     if current_v_bal[0] < item['price']:
                         fail_count += 1
                         error_msg = "Insufficient balance"
-                        failed_names_list.append(item.get('name', raw_items_str))
+                        failed_names_list.append(item.get('pkg_name', raw_items_str.upper()))
                         continue
 
                     current_v_bal[0] -= item['price']
 
                     skip_check = False 
+                    res = {}
                     
-                    res = await process_func(
-                        game_id, zone_id, item['pid'], currency, 
-                        prev_context=prev_context, skip_role_check=skip_check, 
-                        known_ig_name=ig_name, last_success_order_id=last_success_order
-                    )
-                    
+                    # 🟢 Auto-Retry System (API ကြောင့် Error တက်ပါက ၁.၅ စက္ကန့်ခြားပြီး အလိုအလျောက် ထပ်စမ်းမည်)
+                    max_retries = 2
+                    for attempt in range(max_retries):
+                        res = await process_func(
+                            game_id, zone_id, item['pid'], currency, 
+                            prev_context=prev_context, skip_role_check=skip_check, 
+                            known_ig_name=ig_name, last_success_order_id=last_success_order
+                        )
+                        
+                        error_text_check = str(res.get('message', '')).lower()
+                        
+                        # အောင်မြင်သွားလျှင် (သို့) မသေချာသော API Error မဟုတ်လျှင် (ID မှား/ငွေမလောက်) ချက်ချင်းရပ်မည်
+                        if res.get('status') == 'success' or "insufficient" in error_text_check or "invalid" in error_text_check or "not found" in error_text_check:
+                            break
+                            
+                        # API Error (Query Failed/Unable) ဖြစ်ပါက 1.5 စက္ကန့်စောင့်၍ နောက်တစ်ကြိမ် ထပ်စမ်းမည်
+                        if attempt < max_retries - 1:
+                            import asyncio
+                            await asyncio.sleep(1.5)
+                            
                     fetched_name = res.get('ig_name') or res.get('username') or res.get('role_name') or res.get('nickname')
                     if fetched_name and str(fetched_name).strip() not in ["", "Unknown", "None"]:
                         ig_name = str(fetched_name).strip()
@@ -957,14 +972,14 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                         success_count += 1
                         total_spent += item['price']
                         order_ids_str += f"{res.get('order_id', '')}\n"
-                        actual_names_list.append(item.get('name', raw_items_str))
+                        actual_names_list.append(item.get('pkg_name', raw_items_str.upper()))
                         prev_context = {'csrf_token': res.get('csrf_token')}
                         last_success_order = res.get('order_id', '')
                     else:
                         current_v_bal[0] += item['price']
                         fail_count += 1
                         error_msg = res.get('message', 'Unknown Error')
-                        failed_names_list.append(item.get('name', raw_items_str))
+                        failed_names_list.append(item.get('pkg_name', raw_items_str.upper()))
                         
             return {
                 'game_id': game_id, 'zone_id': zone_id, 'raw_items_str': raw_items_str, 
@@ -1002,8 +1017,9 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                 
                 final_order_ids = res['order_ids_str'].strip().replace('\n', ', ')
                 
-                unique_success = list(set(res['actual_names_list']))
-                success_item_name = ", ".join(unique_success) if unique_success else res['raw_items_str']
+                # 🟢 အပိုင်းပိုင်းဝယ်ထားသော်လည်း မူရင်း Package နာမည် (ဥပမာ 429) ကိုသာ ပြမည်
+                unique_success = list(dict.fromkeys(res['actual_names_list']))
+                success_item_name = ", ".join(unique_success) if unique_success else res['raw_items_str'].upper()
                 
                 await db.save_order(
                     tg_id=tg_id, game_id=res['game_id'], zone_id=res['zone_id'], item_name=success_item_name, 
@@ -1014,7 +1030,7 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                 report += f"GAME ID      : {res['game_id']} {res['zone_id']}\n"
                 report += f"IG NAME      : {safe_ig_name}\n"
                 report += f"SERIAL       :\n{res['order_ids_str'].strip()}\n"
-                report += f"ITEM         : {success_item_name}\n"
+                report += f"ITEM         : {success_item_name} 💎\n"
                 report += f"SPENT        : {res['total_spent']:.2f} 🪙\n\n"
 
             if res['fail_count'] > 0:
@@ -1026,7 +1042,8 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                     display_err = "Invalid Account"
                 elif "limit" in error_text or "exceed" in error_text or "máximo" in error_text or "limite" in error_text:
                     display_err = "Weekly Pass Limit Exceeded"
-                elif "zone" in error_text or "region" in error_text or "country" in error_text or "query failed" in error_text:
+                # 🟢 Error အတိအကျ ဖမ်းမည့်နေရာ
+                elif "zone" in error_text or "region" in error_text or "country" in error_text or "indonesia" in error_text or "support recharge" in error_text or "Singapore" in error_text or "Russia" in error_text or "the Philippines" in error_text:
                     display_err = "Ban Server"
                 else: 
                     display_err = res['error_msg'].replace('❌', '').strip()
@@ -1036,13 +1053,13 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                         if "unable" in error_text or "fail" in error_text or "error" in error_text:
                             display_err = "Weekly Pass Limit Exceeded"
                 
-                unique_failed = list(set(res['failed_names_list']))
-                failed_item_name = ", ".join(unique_failed) if unique_failed else res['raw_items_str']
+                unique_failed = list(dict.fromkeys(res['failed_names_list']))
+                failed_item_name = ", ".join(unique_failed) if unique_failed else res['raw_items_str'].upper()
                 
                 report += f"ORDER STATUS : ❌ FAILED\n"
                 report += f"GAME ID      : {res['game_id']} {res['zone_id']}\n"
                 report += f"IG NAME      : {safe_ig_name}\n"
-                report += f"ITEM         : {failed_item_name}\n"
+                report += f"ITEM         : {failed_item_name} 💎\n"
                 report += f"ERROR        : {display_err}\n\n"
 
             report += f"DATE         : {date_str}\n"
@@ -1174,7 +1191,7 @@ async def auto_calculator(message: types.Message):
 async def keep_cookie_alive():
     while True:
         try:
-            await asyncio.sleep(2 * 60) 
+            await asyncio.sleep(random.randint(2, 7)) 
             scraper = await get_main_scraper()
             headers = {'User-Agent': 'Mozilla/5.0', 'X-Requested-With': 'XMLHttpRequest', 'Origin': 'https://www.smile.one'}
             response = await scraper.get('https://www.smile.one/customer/order', headers=headers)
@@ -1317,7 +1334,7 @@ async def handle_check_role(message: types.Message):
             return await loading_msg.edit_text("❌ **Invalid Account:** Game ID or Zone ID is incorrect or not found.", parse_mode=ParseMode.HTML)
             
         country_code = user_data.get('country', 'Unknown')
-        country_map = {"MM": "Myanmar", "MY": "Malaysia", "PH": "Philippines", "ID": "Indonesia", "BR": "Brazil", "SG": "Singapore", "KH": "Cambodia", "TH": "Thailand"}
+        country_map = {"MM": "Myanmar", "FR": "France", "MY": "Malaysia", "PH": "Philippines", "ID": "Indonesia", "BR": "Brazil", "SG": "Singapore", "KH": "Cambodia", "TH": "Thailand"}
         final_region = country_map.get(str(country_code).upper(), country_code)
 
         limit_50 = limit_150 = limit_250 = limit_500 = True 
