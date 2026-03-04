@@ -8,6 +8,8 @@ import asyncio
 import html
 from collections import defaultdict
 import concurrent.futures
+import aiohttp
+import json
 
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -366,14 +368,18 @@ async def process_smile_one_order(game_id, zone_id, product_id, currency_name, p
         flowid = query_result.get('flowid') or query_result.get('data', {}).get('flowid')
         
         if not flowid:
-            real_error = query_result.get('msg') or query_result.get('message') or ""
+            # 🟢 ပြင်ဆင်ချက် ၁: info ထဲက စာသားကိုပါ ဖမ်းယူမည်
+            real_error = query_result.get('msg') or query_result.get('message') or query_result.get('info') or ""
+            
             if "login" in str(real_error).lower() or "unauthorized" in str(real_error).lower():
                 GLOBAL_CSRF[cache_key] = None
                 await notify_owner("⚠️ <b>Order Alert:</b> Cookie expired. Auto-login started...")
                 success = await auto_login_and_get_cookie()
                 if success: return {"status": "error", "message": "Session renewed. Please try again."}
                 else: return {"status": "error", "message": "❌ Auto-Login failed. Please /setcookie."}
-            return {"status": "error", "message": f"❌ Query Failed: {real_error}"}
+                
+            # 🟢 ပြင်ဆင်ချက် ၂: info စာသား အပြည့်အစုံ ပြန်ပို့ပေးမည် (execute_buy_process မှ Ban Server ဟု ခွဲခြားနိုင်ရန်)
+            return {"status": "error", "message": str(real_error)}
 
         pay_data = {'_csrf': csrf_token, 'user_id': game_id, 'zone_id': zone_id, 'pay_methond': 'smilecoin', 'product_id': product_id, 'channel_method': 'smilecoin', 'flowid': flowid, 'email': '', 'coupon_id': ''}
         pay_response_raw = await scraper.post(pay_url, data=pay_data, headers=headers)
@@ -389,7 +395,9 @@ async def process_smile_one_order(game_id, zone_id, product_id, currency_name, p
             pay_json = pay_response_raw.json()
             status_val = str(pay_json.get('status', ''))
             code = str(pay_json.get('code', status_val))
-            msg = str(pay_json.get('msg', pay_json.get('message', ''))).lower()
+            
+            # 🟢 ပြင်ဆင်ချက် ၃: pay_json တွင်လည်း info ပါလာပါက ဖမ်းယူမည်
+            msg = str(pay_json.get('msg') or pay_json.get('message') or pay_json.get('info') or "").lower()
             
             if code in ['200', '0', '1'] or 'success' in msg: 
                 is_success = True
@@ -421,9 +429,12 @@ async def process_smile_one_order(game_id, zone_id, product_id, currency_name, p
         if is_success:
             return {"status": "success", "ig_name": ig_name, "order_id": real_order_id, "csrf_token": csrf_token, "product_name": actual_product_name}
         else:
-            return {"status": "error", "message": "Payment Verification Failed."}
+            # Pay မအောင်မြင်ပါက အတိအကျ Error Message ကို ပြန်ပို့မည်
+            error_detail = pay_json.get('msg') or pay_json.get('message') or pay_json.get('info') if 'pay_json' in locals() else "Payment Verification Failed."
+            return {"status": "error", "message": str(error_detail)}
 
-    except Exception as e: return {"status": "error", "message": f"System Error: {str(e)}"}
+    except Exception as e: 
+        return {"status": "error", "message": f"System Error: {str(e)}"}
 
 async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_context=None, skip_role_check=False, known_ig_name="Unknown", last_success_order_id=""):
     scraper = await get_main_scraper()
