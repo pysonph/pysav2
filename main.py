@@ -961,13 +961,13 @@ async def handle_topup(message: types.Message):
                     net_added = added_amount
                 else:
                     if added_amount >= 10000:
-                        fee_percent = 0.10
+                        fee_percent = 0.0
                     elif added_amount >= 5000:
-                        fee_percent = 0.15
+                        fee_percent = 0.0
                     elif added_amount >= 1000:
-                        fee_percent = 0.20
+                        fee_percent = 0.0
                     else:
-                        fee_percent = 0.30
+                        fee_percent = 0.0
 
                 fee_amount = round(added_amount * (fee_percent / 100), 2)
                 net_added = round(added_amount - fee_amount, 2)
