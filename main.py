@@ -22,6 +22,28 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 
 import database as db
+from aiogram import BaseMiddleware
+from aiogram.types import Message
+from typing import Callable, Dict, Any, Awaitable
+
+# ပုံမှန်အားဖြင့် Maintenance ကို ပိတ်ထားမည်
+IS_MAINTENANCE = False 
+
+class MaintenanceMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[Message, Dict[str, Any]], Awaitable[Any]],
+        event: Message,
+        data: Dict[str, Any]
+    ) -> Any:
+        global IS_MAINTENANCE
+        if IS_MAINTENANCE:
+            # Owner ကလွဲ၍ ကျန်သော User များကို Block မည်
+            if event.from_user.id != OWNER_ID:
+                await event.reply("⚠️ ပြုပြင်ဆောင်ရွက်နေပါသဖြင့် Topup ဘော့အား ခနရပ်ထားပါသည်။")
+                return # ဤနေရာတွင် ရပ်ပစ်မည် (Command များဆီ ဆက်မသွားတော့ပါ)
+        return await handler(event, data)
+
 
 load_dotenv()
 
@@ -38,6 +60,7 @@ MMT = datetime.timezone(datetime.timedelta(hours=6, minutes=30))
 
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
+dp.message.middleware(MaintenanceMiddleware())
 
 user_locks = defaultdict(asyncio.Lock)
 api_semaphore = asyncio.Semaphore(3)
@@ -832,6 +855,11 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
         for line in lines:
             line = line.strip()
             if not line: continue 
+            
+            # 🟢 ကွင်းအပိတ် ')' ၏ အနောက်တွင် Space မပါခဲ့လျှင် အလိုအလျောက် ခြားပေးမည့်အပိုင်း
+            import re
+            line = re.sub(r'\)\s*', ') ', line)
+            
             match = re.search(regex_pattern, line)
             if not match:
                 await message.reply(f"Invalid format: `{line}`\nCheck /help for correct format.")
@@ -881,13 +909,10 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
 
         user_wallet = await db.get_reseller(tg_id)
         user_v_bal = user_wallet.get(v_bal_key, 0.0) if user_wallet else 0.0
-        
-        # 🟢 ဖယ်ရှားလိုက်သောအပိုင်း: Item မဝယ်ခင် ကြိုတင် Balance စစ်ပြီး Error စာတန်းပြခြင်းကို ဖြုတ်လိုက်ပါပြီ။
             
         start_time = time.time()
         loading_msg = await message.reply(f"Order processing[ {len(parsed_orders)} | 0 ] ● ᥫ᭡")
 
-        # 🟢 တကယ်ဝယ်သည့်အချိန်မှသာ Balance ကို Item တစ်ခုချင်းစီအလိုက် စစ်ဆေးရန်
         current_v_bal = [user_v_bal] 
 
         async def process_order_line(order):
@@ -897,50 +922,49 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
             items_to_buy = order['items_to_buy']
             
             success_count, fail_count, total_spent = 0, 0, 0.0
-            order_ids_str, ig_name, error_msg = "", "Unknown", ""
+            order_ids_str, error_msg = "", ""
             actual_names_list = [] 
             failed_names_list = [] 
             
+            ig_name = "Unknown"
+
             async with api_semaphore:
                 prev_context = None
-                is_first = True
                 last_success_order = ""
                 
                 for item in items_to_buy:
-                    # 🟢 တကယ်ဝယ်မည့်အချိန်ကျမှ V-Wallet တွင် ငွေလောက်/မလောက် စစ်ဆေးမည်
                     if current_v_bal[0] < item['price']:
                         fail_count += 1
                         error_msg = "Insufficient balance"
                         failed_names_list.append(item.get('name', raw_items_str))
-                        is_first = False
                         continue
 
-                    # ပိုက်ဆံလောက်ပါက ခဏ နှုတ်ထားမည် (ထပ်နေသော Order များ Overspend မဖြစ်စေရန်)
                     current_v_bal[0] -= item['price']
 
-                    skip_check = not is_first
+                    skip_check = False 
+                    
                     res = await process_func(
                         game_id, zone_id, item['pid'], currency, 
                         prev_context=prev_context, skip_role_check=skip_check, 
                         known_ig_name=ig_name, last_success_order_id=last_success_order
                     )
                     
-                    if res['status'] == 'success':
+                    fetched_name = res.get('ig_name') or res.get('username') or res.get('role_name') or res.get('nickname')
+                    if fetched_name and str(fetched_name).strip() not in ["", "Unknown", "None"]:
+                        ig_name = str(fetched_name).strip()
+
+                    if res.get('status') == 'success':
                         success_count += 1
                         total_spent += item['price']
-                        order_ids_str += f"{res['order_id']}\n"
-                        ig_name = res['ig_name']
+                        order_ids_str += f"{res.get('order_id', '')}\n"
                         actual_names_list.append(item.get('name', raw_items_str))
-                        prev_context = {'csrf_token': res['csrf_token']}
-                        last_success_order = res['order_id']
+                        prev_context = {'csrf_token': res.get('csrf_token')}
+                        last_success_order = res.get('order_id', '')
                     else:
-                        # ဝယ်ယူမှု မအောင်မြင်ပါက နှုတ်ထားသောငွေကို ပြန်ပေါင်းပေးမည်
                         current_v_bal[0] += item['price']
                         fail_count += 1
-                        error_msg = res['message']
+                        error_msg = res.get('message', 'Unknown Error')
                         failed_names_list.append(item.get('name', raw_items_str))
-                        
-                    is_first = False
                         
             return {
                 'game_id': game_id, 'zone_id': zone_id, 'raw_items_str': raw_items_str, 
@@ -955,6 +979,7 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
         await loading_msg.delete() 
 
         for res in line_results:
+            import datetime
             now = datetime.datetime.now(MMT)
             date_str = now.strftime("%m/%d/%Y, %I:%M:%S %p")
             
@@ -964,11 +989,9 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
             initial_bal_for_receipt = user_v_bal
             new_v_bal = user_v_bal
             
-            # 🟢 <blockquote><pre> ဖြင့် အထက်အောက် ညီညာသော Bill ဖန်တီးခြင်း
             report = f"<blockquote><pre>{title_prefix} {res['game_id']} ({res['zone_id']}) {res['raw_items_str'].upper()} ({currency})\n"
             report += f"=== TRANSACTION REPORT ===\n\n"
 
-            # အောင်မြင်သော အပိုင်း (Success Section)
             if res['success_count'] > 0:
                 if currency == 'BR': await db.update_balance(tg_id, br_amount=-res['total_spent'])
                 else: await db.update_balance(tg_id, ph_amount=-res['total_spent'])
@@ -982,7 +1005,6 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                 unique_success = list(set(res['actual_names_list']))
                 success_item_name = ", ".join(unique_success) if unique_success else res['raw_items_str']
                 
-                # Database ထဲ သိမ်းမည်
                 await db.save_order(
                     tg_id=tg_id, game_id=res['game_id'], zone_id=res['zone_id'], item_name=success_item_name, 
                     price=res['total_spent'], order_id=final_order_ids, status="success"
@@ -992,15 +1014,27 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                 report += f"GAME ID      : {res['game_id']} {res['zone_id']}\n"
                 report += f"IG NAME      : {safe_ig_name}\n"
                 report += f"SERIAL       :\n{res['order_ids_str'].strip()}\n"
-                report += f"ITEM         : {success_item_name} \n"
+                report += f"ITEM         : {success_item_name}\n"
                 report += f"SPENT        : {res['total_spent']:.2f} 🪙\n\n"
 
-            # မအောင်မြင်သော အပိုင်း (Failed Section)
             if res['fail_count'] > 0:
                 error_text = str(res['error_msg']).lower()
-                if "insufficient" in error_text or "saldo" in error_text: display_err = "Insufficient balance"
-                elif "query failed" in error_text or "unable to purchase" in error_text or "invalid account" in error_text or "not found" in error_text: display_err = "Ban Server"
-                else: display_err = res['error_msg'].replace('❌', '').strip()
+                
+                if "insufficient" in error_text or "saldo" in error_text: 
+                    display_err = "Insufficient balance"
+                elif "invalid" in error_text or "not found" in error_text:
+                    display_err = "Invalid Account"
+                elif "limit" in error_text or "exceed" in error_text or "máximo" in error_text or "limite" in error_text:
+                    display_err = "Weekly Pass Limit Exceeded"
+                elif "zone" in error_text or "region" in error_text or "country" in error_text:
+                    display_err = "Ban Server"
+                else: 
+                    display_err = res['error_msg'].replace('❌', '').strip()
+                    if not display_err: display_err = "Purchase Failed"
+                    
+                    if res['success_count'] > 0 and "wp" in res['raw_items_str'].lower():
+                        if "unable" in error_text or "fail" in error_text or "error" in error_text:
+                            display_err = "Weekly Pass Limit Exceeded"
                 
                 unique_failed = list(set(res['failed_names_list']))
                 failed_item_name = ", ".join(unique_failed) if unique_failed else res['raw_items_str']
@@ -1008,10 +1042,9 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                 report += f"ORDER STATUS : ❌ FAILED\n"
                 report += f"GAME ID      : {res['game_id']} {res['zone_id']}\n"
                 report += f"IG NAME      : {safe_ig_name}\n"
-                report += f"ITEM         : {failed_item_name} \n"
+                report += f"ITEM         : {failed_item_name}\n"
                 report += f"ERROR        : {display_err}\n\n"
 
-            # Footer အပိုင်း (Date, Username, Balances)
             report += f"DATE         : {date_str}\n"
             report += f"USERNAME     :\n{safe_username}\n"
             report += f"INITIAL      : ${initial_bal_for_receipt:,.2f}\n"
@@ -1027,15 +1060,15 @@ async def handle_br_mlbb(message: types.Message):
         return await message.reply(f"ɴᴏᴛ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ ᴜsᴇʀ.❌")
     try:
         lines = [line.strip() for line in message.text.strip().split('\n') if line.strip()]
-        regex = r"(?i)^(?:(?:msc|mlb|br|b)\s+)?(\d+)\s*(?:[\(]?\s*(\d+)\s*[\)]?)\s+(.+)"
+        regex = r"(?i)^(?:b|br|mlb|msc)\s+(\d+)\s*\(?\s*(\d+)\s*\)?\s+(.+)$"
         
         total_pkgs = 0
         for line in lines:
             match = re.search(regex, line)
             if match: total_pkgs += len(match.group(3).split())
             
-        if total_pkgs > 5: 
-            return await message.reply("❌ 5 Limit Exceeded: တစ်ကြိမ်လျှင် အများဆုံး ၅ ခုသာ ဝယ်ယူနိုင်ပါသည်။")
+        if total_pkgs > 3: 
+            return await message.reply("❌ 5 Limit Exceeded: တစ်ကြိမ်လျှင် အများဆုံး ၃ ခုသာ ဝယ်ယူနိုင်ပါသည်။")
             
         await execute_buy_process(message, lines, regex, 'BR', [DOUBLE_DIAMOND_PACKAGES, BR_PACKAGES], process_smile_one_order, "MLBB")
     except Exception as e: 
@@ -1047,15 +1080,15 @@ async def handle_ph_mlbb(message: types.Message):
         return await message.reply(f"ɴᴏᴛ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ ᴜsᴇʀ.❌")
     try:
         lines = [line.strip() for line in message.text.strip().split('\n') if line.strip()]
-        regex = r"(?i)^(?:(?:mlp|ph|p)\s+)?(\d+)\s*(?:[\(]?\s*(\d+)\s*[\)]?)\s+(.+)"
+        regex = r"(?i)^(?:p|ph|mlp|mcp)\s+(\d+)\s*\(?\s*(\d+)\s*\)?\s+(.+)$"
         
         total_pkgs = 0
         for line in lines:
             match = re.search(regex, line)
             if match: total_pkgs += len(match.group(3).split())
             
-        if total_pkgs > 5: 
-            return await message.reply("❌ 5 Limit Exceeded: တစ်ကြိမ်လျှင် အများဆုံး ၅ ခုသာ ဝယ်ယူနိုင်ပါသည်။")
+        if total_pkgs > 3: 
+            return await message.reply("❌ 5 Limit Exceeded: တစ်ကြိမ်လျှင် အများဆုံး ၃ ခုသာ ဝယ်ယူနိုင်ပါသည်။")
             
         await execute_buy_process(message, lines, regex, 'PH', PH_PACKAGES, process_smile_one_order, "MLBB")
     except Exception as e: 
@@ -1067,7 +1100,7 @@ async def handle_br_mcc(message: types.Message):
         return await message.reply(f"ɴᴏᴛ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ ᴜsᴇʀ.❌")
     try:
         lines = [line.strip() for line in message.text.strip().split('\n') if line.strip()]
-        regex = r"(?i)^(?:(?:mcc|mcb)\s+)?(\d+)\s*(?:[\(]?\s*(\d+)\s*[\)]?)\s+(.+)"
+        regex = r"(?i)^(?:(?:mcc|mcb|mcp|mcgg)\s+)?(\d+)\s*\(?\s*(\d+)\s*\)?\s*(.+)$"
         
         total_pkgs = 0
         for line in lines:
@@ -1087,7 +1120,7 @@ async def handle_ph_mcc(message: types.Message):
         return await message.reply(f"ɴᴏᴛ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ ᴜsᴇʀ.❌")
     try:
         lines = [line.strip() for line in message.text.strip().split('\n') if line.strip()]
-        regex = r"(?i)^(?:mcp\s+)?(\d+)\s*(?:[\(]?\s*(\d+)\s*[\)]?)\s+(.+)"
+        regex = r"(?i)^(?:mcp\s+)?(\d+)\s*\(?\s*(\d+)\s*\)?\s*(.+)$"
         
         total_pkgs = 0
         for line in lines:
@@ -1555,6 +1588,27 @@ class ScamAlertMiddleware(BaseMiddleware):
                     break 
         return await handler(event, data)
 
+
+@dp.message(or_f(Command("maintenance"), F.text.regexp(r"(?i)^\.maintenance(?:$|\s+)")))
+async def toggle_maintenance(message: types.Message):
+    # Owner (Admin) သာလျှင် ဤ Command ကို အသုံးပြုနိုင်မည်
+    if message.from_user.id != OWNER_ID:
+        return await message.reply("ɴᴏᴛ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ ᴜsᴇʀ.")
+        
+    parts = message.text.strip().lower().split()
+    if len(parts) < 2 or parts[1] not in ["enable", "disable"]:
+        return await message.reply("⚠️ **Usage:** `.maintenance enable` သို့မဟုတ် `.maintenance disable`")
+        
+    global IS_MAINTENANCE
+    action = parts[1]
+    
+    if action == "enable":
+        IS_MAINTENANCE = True
+        await message.reply("✅ **Maintenance Mode ENABLED.**\nယခုအချိန်မှစ၍ Admin မှလွဲ၍ အခြား User များ Bot ကို အသုံးပြု၍ မရတော့ပါ။")
+    elif action == "disable":
+        IS_MAINTENANCE = False
+        await message.reply("✅ **Maintenance Mode DISABLED.**\nBot ကို ပုံမှန်အတိုင်း ပြန်လည်အသုံးပြုနိုင်ပါပြီ။")
+
 # ==========================================
 # 🚨 2. SCAMMER MANAGEMENT COMMANDS (AUTHORIZED USERS & OWNER)
 # ==========================================
@@ -1638,6 +1692,7 @@ async def send_help_message(message: types.Message):
             f"\n━━━━━━━━━━━━━━━━━\n"
             f"<b>👑 𝐎𝐰𝐧𝐞𝐫 𝐓𝐨𝐨𝐥𝐬 (Admin သီးသန့်)</b>\n\n"
             f"<b>👥 ယူဆာစီမံခန့်ခွဲမှု</b>\n"
+            f"🔸 <code>.maintenance [ᴇɴᴀʙʟᴇ/ᴅɪsᴀʙʟᴇ] : ᴇɴᴀʙʟᴇ ᴏʀ ᴅɪsᴀʙʟᴇ ᴛʜᴇ ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ ᴍᴏᴅᴇ ᴏғ ʏᴏᴜʀ ʙᴏᴛ.\n"
             f"🔸 <code>.add ID</code>    : User အသစ်ထည့်ရန်\n"
             f"🔸 <code>.remove ID</code> : User အား ဖယ်ရှားရန်\n"
             f"🔸 <code>.users</code>     : User စာရင်းအားလုံး ကြည့်ရန်\n\n"
