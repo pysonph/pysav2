@@ -782,10 +782,10 @@ async def handle_topup(message: types.Message):
             else:
                 if user_id_int == OWNER_ID: fee_percent = 0.0
                 else:
-                    if added_amount >= 10000: fee_percent = 0.10
-                    elif added_amount >= 5000: fee_percent = 0.15
-                    elif added_amount >= 1000: fee_percent = 0.2
-                    else: fee_percent = 0.3
+                    if added_amount >= 10000: fee_percent = 0
+                    elif added_amount >= 5000: fee_percent = 0
+                    elif added_amount >= 1000: fee_percent = 0
+                    else: fee_percent = 0.0
 
                 fee_amount = round(added_amount * (fee_percent / 100), 2)
                 net_added = round(added_amount - fee_amount, 2)
