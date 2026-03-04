@@ -877,7 +877,7 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
             raw_items_str = match.group(3).lower()
             
             requested_packages = raw_items_str.split()
-            items_to_buy = []
+            packages_to_buy = [] # 🟢 Package တစ်ခုချင်းစီကို သီးခြားခွဲထုတ်မှတ်သားမည်
             not_found_pkgs = []
             
             for pkg in requested_packages:
@@ -892,26 +892,30 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                         active_packages = packages_dict
                         
                 if active_packages: 
-                    # 🟢 Package ခွဲဝယ်သော်လည်း မူရင်းနာမည် (ဥပမာ 429) ကို မှတ်ထားမည်
+                    pkg_items = []
                     for item_dict in active_packages[pkg]:
                         new_item = item_dict.copy()
                         new_item['pkg_name'] = pkg.upper() 
-                        items_to_buy.append(new_item)
+                        pkg_items.append(new_item)
+                    packages_to_buy.append({
+                        'pkg_name': pkg.upper(),
+                        'items': pkg_items
+                    })
                 else: 
                     not_found_pkgs.append(pkg)
                     
             if not_found_pkgs:
                 await message.reply(f"❌ Package(s) not found for ID {game_id}: {', '.join(not_found_pkgs)}")
                 continue
-            if not items_to_buy: 
+            if not packages_to_buy: 
                 continue
                 
-            line_price = sum(item['price'] for item in items_to_buy)
+            line_price = sum(item['price'] for p in packages_to_buy for item in p['items'])
             parsed_orders.append({
                 'game_id': game_id, 
                 'zone_id': zone_id, 
                 'raw_items_str': raw_items_str, 
-                'items_to_buy': items_to_buy, 
+                'packages_to_buy': packages_to_buy, 
                 'line_price': line_price
             })
             
@@ -928,75 +932,100 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
 
         async def process_order_line(order):
             game_id = order['game_id']
-            zone_id = order['order_zone'] if 'order_zone' in order else order['zone_id']
+            zone_id = order.get('order_zone', order['zone_id'])
             raw_items_str = order['raw_items_str']
-            items_to_buy = order['items_to_buy']
+            packages_to_buy = order['packages_to_buy']
             
-            success_count, fail_count, total_spent = 0, 0, 0.0
-            order_ids_str, error_msg = "", ""
-            actual_names_list = [] 
-            failed_names_list = [] 
+            overall_success_count = 0
+            overall_fail_count = 0
+            total_spent = 0.0
             
             ig_name = "Unknown"
+            package_results = [] # 🟢 Package တစ်ခုချင်းစီ၏ ရလဒ်များကို သိမ်းဆည်းရန်
 
             async with api_semaphore:
                 prev_context = None
                 last_success_order = ""
                 
-                for item in items_to_buy:
-                    if current_v_bal[0] < item['price']:
-                        fail_count += 1
-                        error_msg = "Insufficient balance"
-                        failed_names_list.append(item.get('pkg_name', raw_items_str.upper()))
-                        continue
-
-                    current_v_bal[0] -= item['price']
-
-                    skip_check = False 
-                    res = {}
+                for pkg_data in packages_to_buy:
+                    pkg_name = pkg_data['pkg_name']
+                    items = pkg_data['items']
                     
-                    # 🟢 Auto-Retry System (API ကြောင့် Error တက်ပါက ၁.၅ စက္ကန့်ခြားပြီး အလိုအလျောက် ထပ်စမ်းမည်)
-                    max_retries = 2
-                    for attempt in range(max_retries):
-                        res = await process_func(
-                            game_id, zone_id, item['pid'], currency, 
-                            prev_context=prev_context, skip_role_check=skip_check, 
-                            known_ig_name=ig_name, last_success_order_id=last_success_order
-                        )
+                    pkg_success = True
+                    pkg_order_ids = ""
+                    pkg_spent = 0.0
+                    pkg_error = ""
+                    
+                    for item in items:
+                        if current_v_bal[0] < item['price']:
+                            pkg_success = False
+                            pkg_error = "Insufficient balance"
+                            overall_fail_count += 1
+                            break
+
+                        current_v_bal[0] -= item['price']
+
+                        skip_check = False 
+                        res = {}
                         
-                        error_text_check = str(res.get('message', '')).lower()
-                        
-                        # အောင်မြင်သွားလျှင် (သို့) မသေချာသော API Error မဟုတ်လျှင် (ID မှား/ငွေမလောက်) ချက်ချင်းရပ်မည်
-                        if res.get('status') == 'success' or "insufficient" in error_text_check or "invalid" in error_text_check or "not found" in error_text_check:
+                        max_retries = 2
+                        for attempt in range(max_retries):
+                            res = await process_func(
+                                game_id, zone_id, item['pid'], currency, 
+                                prev_context=prev_context, skip_role_check=skip_check, 
+                                known_ig_name=ig_name, last_success_order_id=last_success_order
+                            )
+                            
+                            error_text_check = str(res.get('message', '')).lower()
+                            
+                            if res.get('status') == 'success' or "insufficient" in error_text_check or "invalid" in error_text_check or "not found" in error_text_check:
+                                break
+                                
+                            if attempt < max_retries - 1:
+                                import asyncio
+                                await asyncio.sleep(1.5)
+                                
+                        fetched_name = res.get('ig_name') or res.get('username') or res.get('role_name') or res.get('nickname')
+                        if fetched_name and str(fetched_name).strip() not in ["", "Unknown", "None"]:
+                            ig_name = str(fetched_name).strip()
+
+                        if res.get('status') == 'success':
+                            pkg_spent += item['price']
+                            pkg_order_ids += f"{res.get('order_id', '')}\n"
+                            prev_context = {'csrf_token': res.get('csrf_token')}
+                            last_success_order = res.get('order_id', '')
+                        else:
+                            current_v_bal[0] += item['price']
+                            pkg_success = False
+                            pkg_error = res.get('message', 'Unknown Error')
                             break
                             
-                        # API Error (Query Failed/Unable) ဖြစ်ပါက 1.5 စက္ကန့်စောင့်၍ နောက်တစ်ကြိမ် ထပ်စမ်းမည်
-                        if attempt < max_retries - 1:
-                            import asyncio
-                            await asyncio.sleep(1.5)
-                            
-                    fetched_name = res.get('ig_name') or res.get('username') or res.get('role_name') or res.get('nickname')
-                    if fetched_name and str(fetched_name).strip() not in ["", "Unknown", "None"]:
-                        ig_name = str(fetched_name).strip()
-
-                    if res.get('status') == 'success':
-                        success_count += 1
-                        total_spent += item['price']
-                        order_ids_str += f"{res.get('order_id', '')}\n"
-                        actual_names_list.append(item.get('pkg_name', raw_items_str.upper()))
-                        prev_context = {'csrf_token': res.get('csrf_token')}
-                        last_success_order = res.get('order_id', '')
+                    if pkg_success:
+                        overall_success_count += 1
+                        total_spent += pkg_spent
                     else:
-                        current_v_bal[0] += item['price']
-                        fail_count += 1
-                        error_msg = res.get('message', 'Unknown Error')
-                        failed_names_list.append(item.get('pkg_name', raw_items_str.upper()))
+                        if pkg_spent > 0:
+                            total_spent += pkg_spent
+                        overall_fail_count += 1
+                        
+                    package_results.append({
+                        'pkg_name': pkg_name,
+                        'status': 'success' if pkg_success else 'fail',
+                        'spent': pkg_spent,
+                        'order_ids': pkg_order_ids.strip(),
+                        'error_msg': pkg_error,
+                        'ig_name': ig_name
+                    })
                         
             return {
-                'game_id': game_id, 'zone_id': zone_id, 'raw_items_str': raw_items_str, 
-                'success_count': success_count, 'fail_count': fail_count, 'total_spent': total_spent, 
-                'order_ids_str': order_ids_str, 'ig_name': ig_name, 'error_msg': error_msg, 
-                'actual_names_list': actual_names_list, 'failed_names_list': failed_names_list
+                'game_id': game_id, 
+                'zone_id': zone_id, 
+                'raw_items_str': raw_items_str, 
+                'success_count': overall_success_count, 
+                'fail_count': overall_fail_count, 
+                'total_spent': total_spent, 
+                'ig_name': ig_name,
+                'package_results': package_results # Package အလိုက် ရလဒ်များ
             }
 
         line_tasks = [process_order_line(order) for order in parsed_orders]
@@ -1006,72 +1035,65 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
 
         for res in line_results:
             import datetime
-            now = datetime.datetime.now(MMT)
+            now = datetime.datetime.now(MMT) 
             date_str = now.strftime("%m/%d/%Y, %I:%M:%S %p")
             
-            safe_ig_name = html.escape(str(res['ig_name']))
             safe_username = html.escape(str(username_display))
             
             initial_bal_for_receipt = user_v_bal
             new_v_bal = user_v_bal
             
-            report = f"<blockquote><pre>{title_prefix} {res['game_id']} ({res['zone_id']}) {res['raw_items_str'].upper()} ({currency})\n"
-            report += f"=== TRANSACTION REPORT ===\n\n"
-
-            if res['success_count'] > 0:
+            if res['total_spent'] > 0:
                 if currency == 'BR': await db.update_balance(tg_id, br_amount=-res['total_spent'])
                 else: await db.update_balance(tg_id, ph_amount=-res['total_spent'])
                 
                 new_wallet = await db.get_reseller(tg_id)
                 new_v_bal = new_wallet.get(v_bal_key, 0.0) if new_wallet else 0.0
                 initial_bal_for_receipt = new_v_bal + res['total_spent']
-                
-                final_order_ids = res['order_ids_str'].strip().replace('\n', ', ')
-                
-                # 🟢 အပိုင်းပိုင်းဝယ်ထားသော်လည်း မူရင်း Package နာမည် (ဥပမာ 429) ကိုသာ ပြမည်
-                unique_success = list(dict.fromkeys(res['actual_names_list']))
-                success_item_name = ", ".join(unique_success) if unique_success else res['raw_items_str'].upper()
-                
-                await db.save_order(
-                    tg_id=tg_id, game_id=res['game_id'], zone_id=res['zone_id'], item_name=success_item_name, 
-                    price=res['total_spent'], order_id=final_order_ids, status="success"
-                )
 
-                report += f"ORDER STATUS : ✅ Success\n"
-                report += f"GAME ID      : {res['game_id']} {res['zone_id']}\n"
-                report += f"IG NAME      : {safe_ig_name}\n"
-                report += f"SERIAL       :\n{res['order_ids_str'].strip()}\n"
-                report += f"ITEM         : {success_item_name} 💎\n"
-                report += f"SPENT        : {res['total_spent']:.2f} 🪙\n\n"
+            report = f"<blockquote><pre>{title_prefix} {res['game_id']} ({res['zone_id']}) {res['raw_items_str'].upper()} ({currency})\n"
+            report += f"=== TRANSACTION REPORT ===\n\n"
 
-            if res['fail_count'] > 0:
-                error_text = str(res['error_msg']).lower()
+            # 🟢 Package တစ်ခုချင်းစီအတွက် Report Block ခွဲထုတ်ခြင်း
+            for pr in res['package_results']:
+                safe_ig_name = html.escape(str(pr['ig_name']))
                 
-                if "insufficient" in error_text or "saldo" in error_text: 
-                    display_err = "Insufficient balance"
-                elif "invalid" in error_text or "not found" in error_text:
-                    display_err = "Invalid Account"
-                elif "limit" in error_text or "exceed" in error_text or "máximo" in error_text or "limite" in error_text:
-                    display_err = "Weekly Pass Limit Exceeded"
-                # 🟢 Error အတိအကျ ဖမ်းမည့်နေရာ
-                elif "zone" in error_text or "region" in error_text or "country" in error_text or "indonesia" in error_text or "support recharge" in error_text or "Singapore" in error_text or "Russia" in error_text or "the Philippines" in error_text:
-                    display_err = "Ban Server"
-                else: 
-                    display_err = res['error_msg'].replace('❌', '').strip()
-                    if not display_err: display_err = "Purchase Failed"
+                if pr['status'] == 'success':
+                    report += f"ORDER STATUS : ✅ Success\n"
+                    report += f"GAME ID      : {res['game_id']} {res['zone_id']}\n"
+                    report += f"IG NAME      : {safe_ig_name}\n"
+                    report += f"SERIAL       :\n{pr['order_ids']}\n"
+                    report += f"ITEM         : {pr['pkg_name']} 💎\n"
+                    report += f"SPENT        : {pr['spent']:.2f} 🪙\n\n"
                     
-                    if res['success_count'] > 0 and "wp" in res['raw_items_str'].lower():
-                        if "unable" in error_text or "fail" in error_text or "error" in error_text:
-                            display_err = "Weekly Pass Limit Exceeded"
-                
-                unique_failed = list(dict.fromkeys(res['failed_names_list']))
-                failed_item_name = ", ".join(unique_failed) if unique_failed else res['raw_items_str'].upper()
-                
-                report += f"ORDER STATUS : ❌ FAILED\n"
-                report += f"GAME ID      : {res['game_id']} {res['zone_id']}\n"
-                report += f"IG NAME      : {safe_ig_name}\n"
-                report += f"ITEM         : {failed_item_name} 💎\n"
-                report += f"ERROR        : {display_err}\n\n"
+                    final_order_ids = pr['order_ids'].replace('\n', ', ')
+                    await db.save_order(
+                        tg_id=tg_id, game_id=res['game_id'], zone_id=res['zone_id'], item_name=pr['pkg_name'], 
+                        price=pr['spent'], order_id=final_order_ids, status="success"
+                    )
+                else:
+                    error_text = str(pr['error_msg']).lower()
+                    if "insufficient" in error_text or "saldo" in error_text: 
+                        display_err = "Insufficient balance"
+                    elif "invalid" in error_text or "not found" in error_text:
+                        display_err = "Invalid Account"
+                    elif "limit" in error_text or "exceed" in error_text or "máximo" in error_text or "limite" in error_text:
+                        display_err = "Weekly Pass Limit Exceeded"
+                    elif "zone" in error_text or "region" in error_text or "country" in error_text or "indonesia" in error_text or "support recharge" in error_text or "Singapore" in error_text or "Russia" in error_text or "the Philippines" in error_text:
+                        display_err = "Ban Server"
+                    else: 
+                        display_err = pr['error_msg'].replace('❌', '').strip()
+                        if not display_err: display_err = "Purchase Failed"
+                        
+                        if "wp" in pr['pkg_name'].lower():
+                            if "unable" in error_text or "fail" in error_text or "error" in error_text:
+                                display_err = "Weekly Pass Limit Exceeded"
+                                
+                    report += f"ORDER STATUS : ❌ FAILED\n"
+                    report += f"GAME ID      : {res['game_id']} {res['zone_id']}\n"
+                    report += f"IG NAME      : {safe_ig_name}\n"
+                    report += f"ITEM         : {pr['pkg_name']} 💎\n"
+                    report += f"ERROR        : {display_err}\n\n"
 
             report += f"DATE         : {date_str}\n"
             report += f"USERNAME     :\n{safe_username}\n"
