@@ -1692,7 +1692,7 @@ async def send_help_message(message: types.Message):
             f"\n━━━━━━━━━━━━━━━━━\n"
             f"<b>👑 𝐎𝐰𝐧𝐞𝐫 𝐓𝐨𝐨𝐥𝐬 (Admin သီးသန့်)</b>\n\n"
             f"<b>👥 ယူဆာစီမံခန့်ခွဲမှု</b>\n"
-            f"🔸 <code>.maintenance [ᴇɴᴀʙʟᴇ/ᴅɪsᴀʙʟᴇ] : ᴇɴᴀʙʟᴇ ᴏʀ ᴅɪsᴀʙʟᴇ ᴛʜᴇ ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ ᴍᴏᴅᴇ ᴏғ ʏᴏᴜʀ ʙᴏᴛ.\n"
+            f"🔸 <code>.maintenance [ᴇɴᴀʙʟᴇ/ᴅɪsᴀʙʟᴇ]</code> : ᴇɴᴀʙʟᴇ ᴏʀ ᴅɪsᴀʙʟᴇ ᴛʜᴇ ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ ᴍᴏᴅᴇ ᴏғ ʏᴏᴜʀ ʙᴏᴛ.\n"
             f"🔸 <code>.add ID</code>    : User အသစ်ထည့်ရန်\n"
             f"🔸 <code>.remove ID</code> : User အား ဖယ်ရှားရန်\n"
             f"🔸 <code>.users</code>     : User စာရင်းအားလုံး ကြည့်ရန်\n\n"
