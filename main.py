@@ -771,10 +771,10 @@ async def handle_topup(message: types.Message):
             else:
                 if user_id_int == OWNER_ID: fee_percent = 0.0
                 else:
-                    if added_amount >= 10000: fee_percent = 0.10
-                    elif added_amount >= 5000: fee_percent = 0.15
-                    elif added_amount >= 1000: fee_percent = 0.20
-                    else: fee_percent = 0.30
+                    if added_amount >= 10000: fee_percent = 0.0
+                    elif added_amount >= 5000: fee_percent = 0.0
+                    elif added_amount >= 1000: fee_percent = 0.0
+                    else: fee_percent = 0.0
 
                 fee_amount = round(added_amount * (fee_percent / 100), 2)
                 net_added = round(added_amount - fee_amount, 2)
@@ -1026,7 +1026,7 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                     display_err = "Invalid Account"
                 elif "limit" in error_text or "exceed" in error_text or "máximo" in error_text or "limite" in error_text:
                     display_err = "Weekly Pass Limit Exceeded"
-                elif "zone" in error_text or "region" in error_text or "country" in error_text:
+                elif "zone" in error_text or "region" in error_text or "country" in error_text or "query failed" in error_text:
                     display_err = "Ban Server"
                 else: 
                     display_err = res['error_msg'].replace('❌', '').strip()
