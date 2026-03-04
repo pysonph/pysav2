@@ -1088,7 +1088,7 @@ async def handle_br_mlbb(message: types.Message):
         return await message.reply(f"ɴᴏᴛ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ ᴜsᴇʀ.❌")
     try:
         lines = [line.strip() for line in message.text.strip().split('\n') if line.strip()]
-        regex = r"(?i)^(?:b|br|mlb|msc)\s+(\d+)\s*\(?\s*(\d+)\s*\)?\s+(.+)$"
+        regex = r"(?i)^(?:(?:b|br|mlb|msc)\s+)?(\d+)\s*\(?\s*(\d+)\s*\)?\s*(.+)$"
         
         total_pkgs = 0
         for line in lines:
@@ -1108,7 +1108,7 @@ async def handle_ph_mlbb(message: types.Message):
         return await message.reply(f"ɴᴏᴛ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ ᴜsᴇʀ.❌")
     try:
         lines = [line.strip() for line in message.text.strip().split('\n') if line.strip()]
-        regex = r"(?i)^(?:p|ph|mlp|mcp)\s+(\d+)\s*\(?\s*(\d+)\s*\)?\s+(.+)$"
+        regex = r"(?i)^(?:(?:p|ph|mlp|mcp)\s+)?(\d+)\s*\(?\s*(\d+)\s*\)?\s*(.+)$"
         
         total_pkgs = 0
         for line in lines:
