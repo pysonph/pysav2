@@ -193,3 +193,39 @@ async def get_today_orders_summary():
     result = await cursor.to_list(length=1)
     return result[0] if result else {"total_spent": 0.0, "total_orders": 0}
 
+
+
+async def get_total_system_balances():
+    """စနစ်ထဲရှိ User အားလုံး၏ V-Wallet Balance စုစုပေါင်းကို တွက်ချက်မည်"""
+    pipeline = [
+        {"$group": {
+            "_id": None,
+            "total_br": {"$sum": "$br_balance"},
+            "total_ph": {"$sum": "$ph_balance"}
+        }}
+    ]
+    cursor = resellers_col.aggregate(pipeline)
+    result = await cursor.to_list(length=1)
+    
+    if result:
+        return {
+            "total_br": round(result[0].get("total_br", 0.0), 2),
+            "total_ph": round(result[0].get("total_ph", 0.0), 2)
+        }
+    return {"total_br": 0.0, "total_ph": 0.0}
+
+
+# ==========================================
+# 🚨 SCAMMER ALERT SYSTEM (DATABASE)
+# ==========================================
+async def add_scammer(game_id: str):
+    await db.scammers.update_one({"game_id": game_id}, {"$set": {"game_id": game_id}}, upsert=True)
+    return True
+
+async def remove_scammer(game_id: str):
+    result = await db.scammers.delete_one({"game_id": game_id})
+    return result.deleted_count > 0
+
+async def get_all_scammers():
+    cursor = db.scammers.find({})
+    return [doc["game_id"] async for doc in cursor]
