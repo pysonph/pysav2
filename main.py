@@ -1242,7 +1242,7 @@ async def auto_calculator(message: types.Message):
 async def keep_cookie_alive():
     while True:
         try:
-            await asyncio.sleep(5, 20) 
+            await asyncio.sleep(3 * 60) 
             scraper = await get_main_scraper()
             headers = {'User-Agent': 'Mozilla/5.0', 'X-Requested-With': 'XMLHttpRequest', 'Origin': 'https://www.smile.one'}
             response = await scraper.get('https://www.smile.one/customer/order', headers=headers)
