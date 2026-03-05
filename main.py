@@ -1799,21 +1799,21 @@ async def send_welcome(message: types.Message):
         status = "🟢 Aᴄᴛɪᴠᴇ" if await is_authorized(message.from_user.id) else "🔴 Nᴏᴛ Aᴄᴛɪᴠᴇ"
         
         welcome_text = (
-            f"<blockquote>ʜᴇʏ ʙᴀʙʏ <tg-emoji emoji-id='{EMOJI_1}'>🥺</tg-emoji>\n\n"
-            f"<tg-emoji emoji-id='{EMOJI_2}'>👤</tg-emoji> <code>{'Usᴇʀɴᴀᴍᴇ' :<11}:</code> {username_display}\n"
-            f"<tg-emoji emoji-id='{EMOJI_3}'>🆔</tg-emoji> <code>{'𝐈𝐃' :<11}:</code> <code>{tg_id}</code>\n"
-            f"<tg-emoji emoji-id='{EMOJI_4}'>📊</tg-emoji> <code>{'Sᴛᴀᴛᴜs' :<11}:</code> {status}\n\n"
-            f"<tg-emoji emoji-id='{EMOJI_5}'>📞</tg-emoji> <code>{'Cᴏɴᴛᴀᴄᴛ ᴜs' :<11}:</code> @iwillgoforwardsalone</blockquote>"
+            f"ʜᴇʏ ʙᴀʙʏ <tg-emoji emoji-id='{EMOJI_1}'>🥺</tg-emoji>\n\n"
+            f"<tg-emoji emoji-id='{EMOJI_2}'>👤</tg-emoji> {'Usᴇʀɴᴀᴍᴇ' :<11}: {username_display}\n"
+            f"<tg-emoji emoji-id='{EMOJI_3}'>🆔</tg-emoji> {'𝐈𝐃' :<11}: <code>{tg_id}</code>\n"
+            f"<tg-emoji emoji-id='{EMOJI_4}'>📊</tg-emoji> {'Sᴛᴀᴛᴜs' :<11}: {status}\n\n"
+            f"<tg-emoji emoji-id='{EMOJI_5}'>📞</tg-emoji> {'Cᴏɴᴛᴀᴄᴛ ᴜs' :<11}: @iwillgoforwardsalone"
         )
         await message.reply(welcome_text, parse_mode=ParseMode.HTML)
     except Exception:
  
         fallback_text = (
-            f"<blockquote>ʜᴇʏ ʙᴀʙʏ 🥺\n\n"
-            f"👤 <code>{'Usᴇʀɴᴀᴍᴇ' :<11}:</code> {full_name}\n"
-            f"🆔 <code>{'𝐈𝐃' :<11}:</code> <code>{tg_id}</code>\n"
-            f"📊 <code>{'Sᴛᴀᴛᴜs' :<11}:</code> 🔴 Nᴏᴛ Aᴄᴛɪᴠᴇ\n\n"
-            f"📞 <code>{'Cᴏɴᴛᴀᴄᴛ ᴜs' :<11}:</code> @iwillgoforwardsalone</blockquote>"
+            f"ʜᴇʏ ʙᴀʙʏ 🥺\n\n"
+            f"👤 {'Usᴇʀɴᴀᴍᴇ' :<11}: {full_name}\n"
+            f"🆔 {'𝐈𝐃' :<11}: <code>{tg_id}</code>\n"
+            f"📊 {'Sᴛᴀᴛᴜs' :<11}: 🔴 Nᴏᴛ Aᴄᴛɪᴠᴇ\n\n"
+            f"📞 {'Cᴏɴᴛᴀᴄᴛ ᴜs' :<11}: @iwillgoforwardsalone"
         )
         await message.reply(fallback_text, parse_mode=ParseMode.HTML)
 
