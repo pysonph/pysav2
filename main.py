@@ -877,7 +877,7 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
             raw_items_str = match.group(3).lower()
             
             requested_packages = raw_items_str.split()
-            packages_to_buy = [] # 🟢 Package တစ်ခုချင်းစီကို သီးခြားခွဲထုတ်မှတ်သားမည်
+            packages_to_buy = [] 
             not_found_pkgs = []
             
             for pkg in requested_packages:
@@ -926,7 +926,7 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
         user_v_bal = user_wallet.get(v_bal_key, 0.0) if user_wallet else 0.0
             
         start_time = time.time()
-        loading_msg = await message.reply(f"Order processing [ {len(parsed_orders)} | 0 ] ● ᥫ᭡")
+        loading_msg = await message.reply(f"Order processing[ {len(parsed_orders)} | 0 ] ● ᥫ᭡")
 
         current_v_bal = [user_v_bal] 
 
@@ -941,7 +941,7 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
             total_spent = 0.0
             
             ig_name = "Unknown"
-            package_results = [] # 🟢 Package တစ်ခုချင်းစီ၏ ရလဒ်များကို သိမ်းဆည်းရန်
+            package_results = [] 
 
             async with api_semaphore:
                 prev_context = None
@@ -1025,7 +1025,7 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                 'fail_count': overall_fail_count, 
                 'total_spent': total_spent, 
                 'ig_name': ig_name,
-                'package_results': package_results # Package အလိုက် ရလဒ်များ
+                'package_results': package_results 
             }
 
         line_tasks = [process_order_line(order) for order in parsed_orders]
@@ -1033,28 +1033,43 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
         time_taken_seconds = int(time.time() - start_time)
         await loading_msg.delete() 
 
+        if not line_results: return
+
+        import datetime
+        now = datetime.datetime.now(MMT) 
+        date_str = now.strftime("%m/%d/%Y, %I:%M:%S %p")
+        
+        safe_username = html.escape(str(username_display))
+        
+        grand_success_count = 0
+        grand_fail_count = 0
+        grand_total_spent = 0.0
+
+        # 🟢 အားလုံးအတွက် Total Spent ကို ပေါင်းပြီးမှ Database ကို တစ်ခါတည်း Update လုပ်မည်
         for res in line_results:
-            import datetime
-            now = datetime.datetime.now(MMT) 
-            date_str = now.strftime("%m/%d/%Y, %I:%M:%S %p")
-            
-            safe_username = html.escape(str(username_display))
-            
-            initial_bal_for_receipt = user_v_bal
-            new_v_bal = user_v_bal
+            grand_success_count += res['success_count']
+            grand_fail_count += res['fail_count']
+            grand_total_spent += res['total_spent']
             
             if res['total_spent'] > 0:
                 if currency == 'BR': await db.update_balance(tg_id, br_amount=-res['total_spent'])
                 else: await db.update_balance(tg_id, ph_amount=-res['total_spent'])
                 
-                new_wallet = await db.get_reseller(tg_id)
-                new_v_bal = new_wallet.get(v_bal_key, 0.0) if new_wallet else 0.0
-                initial_bal_for_receipt = new_v_bal + res['total_spent']
+        new_wallet = await db.get_reseller(tg_id)
+        new_v_bal = new_wallet.get(v_bal_key, 0.0) if new_wallet else 0.0
+        initial_bal_for_receipt = new_v_bal + grand_total_spent
 
-            report = f"<blockquote><pre>{title_prefix} {res['game_id']} ({res['zone_id']}) {res['raw_items_str'].upper()} ({currency})\n"
-            report += f"=== TRANSACTION REPORT ===\n\n"
+        # 🟢 ဘေလ်ခေါင်းစဉ် (ID တစ်ခုတည်းဆိုလျှင် ID ပြမည်၊ အများကြီးဆိုလျှင် BATCH ORDERS ဟုပြမည်)
+        if len(line_results) == 1:
+            header_title = f"{title_prefix} {line_results[0]['game_id']} ({line_results[0]['zone_id']}) {line_results[0]['raw_items_str'].upper()} ({currency})"
+        else:
+            header_title = f"{title_prefix} BATCH ORDERS ({currency})"
+            
+        report = f"<blockquote><pre>{header_title}\n"
+        report += f"=== TRANSACTION REPORT ===\n\n"
 
-            # 🟢 Package တစ်ခုချင်းစီအတွက် Report Block ခွဲထုတ်ခြင်း
+        # 🟢 Order (Package) အားလုံးကို ဘေလ်တစ်ခုတည်းထဲသို့ စုထည့်ခြင်း
+        for res in line_results:
             for pr in res['package_results']:
                 safe_ig_name = html.escape(str(pr['ig_name']))
                 
@@ -1077,6 +1092,8 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                         display_err = "Insufficient balance"
                     elif "invalid" in error_text or "not found" in error_text:
                         display_err = "Invalid Account"
+                    elif "query failed" in error_text:
+                        display_err = "Smileone website error try again."
                     elif "limit" in error_text or "exceed" in error_text or "máximo" in error_text or "limite" in error_text:
                         display_err = "Weekly Pass Limit Exceeded"
                     elif "zone" in error_text or "region" in error_text or "country" in error_text or "indonesia" in error_text or "support recharge" in error_text or "Singapore" in error_text or "Russia" in error_text or "the Philippines" in error_text:
@@ -1095,14 +1112,15 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                     report += f"ITEM         : {pr['pkg_name']} 💎\n"
                     report += f"ERROR        : {display_err}\n\n"
 
-            report += f"DATE         : {date_str}\n"
-            report += f"USERNAME     :\n{safe_username}\n"
-            report += f"INITIAL      : ${initial_bal_for_receipt:,.2f}\n"
-            report += f"FINAL        : ${new_v_bal:,.2f}\n\n"
-            report += f"SUCCESS {res['success_count']} / FAIL {res['fail_count']}\n"
-            report += f"TIME TAKEN   : {time_taken_seconds} SECONDS</pre></blockquote>"
+        # 🟢 နောက်ဆုံးမှသာ Balance သုံးစွဲမှုနှင့် အချိန်ကို တွက်ချက်ပြသခြင်း
+        report += f"DATE         : {date_str}\n"
+        report += f"USERNAME     :\n{safe_username}\n"
+        report += f"INITIAL      : ${initial_bal_for_receipt:,.2f}\n"
+        report += f"FINAL        : ${new_v_bal:,.2f}\n\n"
+        report += f"SUCCESS {grand_success_count} / FAIL {grand_fail_count}\n"
+        report += f"TIME TAKEN   : {time_taken_seconds} SECONDS</pre></blockquote>"
 
-            await message.reply(report, parse_mode=ParseMode.HTML)
+        await message.reply(report, parse_mode=ParseMode.HTML)
 
 @dp.message(F.text.regexp(r"(?i)^(?:msc|mlb|br|b)\s+\d+"))
 async def handle_br_mlbb(message: types.Message):
