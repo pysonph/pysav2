@@ -65,7 +65,7 @@ dp = Dispatcher()
 dp.message.middleware(MaintenanceMiddleware())
 
 user_locks = defaultdict(asyncio.Lock)
-api_semaphore = asyncio.Semaphore(3)
+api_semaphore = asyncio.Semaphore(10)
 auth_lock = asyncio.Lock()
 last_login_time = 0
 GLOBAL_SCAMMERS = set()
@@ -937,7 +937,7 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
         user_v_bal = user_wallet.get(v_bal_key, 0.0) if user_wallet else 0.0
             
         start_time = time.time()
-        loading_msg = await message.reply(f"Order processing[ {len(parsed_orders)} | 0 ] ● ᥫ᭡")
+        loading_msg = await message.reply(f"Order processing [ {len(parsed_orders)} | 0 ] ● ᥫ᭡")
 
         current_v_bal = [user_v_bal] 
 
@@ -1049,38 +1049,27 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
         import datetime
         now = datetime.datetime.now(MMT) 
         date_str = now.strftime("%m/%d/%Y, %I:%M:%S %p")
-        
         safe_username = html.escape(str(username_display))
-        
-        grand_success_count = 0
-        grand_fail_count = 0
-        grand_total_spent = 0.0
 
-        # 🟢 အားလုံးအတွက် Total Spent ကို ပေါင်းပြီးမှ Database ကို တစ်ခါတည်း Update လုပ်မည်
+        # 🟢 စာကြောင်း (Game ID) တစ်ကြောင်းစီအတွက် Report Form တစ်စောင်စီ သီးခြား ထုတ်ပေးမည်
         for res in line_results:
-            grand_success_count += res['success_count']
-            grand_fail_count += res['fail_count']
-            grand_total_spent += res['total_spent']
+            # 🟢 Report တစ်ခုချင်းစီအတွက် Balance ကို သီးခြား ပြန်ခေါ်ပြီး တွက်ချက်မည်
+            current_wallet = await db.get_reseller(tg_id)
+            initial_bal_for_receipt = current_wallet.get(v_bal_key, 0.0) if current_wallet else 0.0
             
             if res['total_spent'] > 0:
                 if currency == 'BR': await db.update_balance(tg_id, br_amount=-res['total_spent'])
                 else: await db.update_balance(tg_id, ph_amount=-res['total_spent'])
                 
-        new_wallet = await db.get_reseller(tg_id)
-        new_v_bal = new_wallet.get(v_bal_key, 0.0) if new_wallet else 0.0
-        initial_bal_for_receipt = new_v_bal + grand_total_spent
-
-        # 🟢 ဘေလ်ခေါင်းစဉ် (ID တစ်ခုတည်းဆိုလျှင် ID ပြမည်၊ အများကြီးဆိုလျှင် BATCH ORDERS ဟုပြမည်)
-        if len(line_results) == 1:
-            header_title = f"{title_prefix} {line_results[0]['game_id']} ({line_results[0]['zone_id']}) {line_results[0]['raw_items_str'].upper()} ({currency})"
-        else:
-            header_title = f"{title_prefix} BATCH ORDERS ({currency})"
+            new_wallet = await db.get_reseller(tg_id)
+            new_v_bal = new_wallet.get(v_bal_key, 0.0) if new_wallet else 0.0
             
-        report = f"<blockquote><pre>{header_title}\n"
-        report += f"=== TRANSACTION REPORT ===\n\n"
+            header_title = f"{title_prefix} {res['game_id']} ({res['zone_id']}) {res['raw_items_str'].upper()} ({currency})"
+            
+            report = f"<blockquote><pre>{header_title}\n"
+            report += f"=== TRANSACTION REPORT ===\n\n"
 
-        # 🟢 Order (Package) အားလုံးကို ဘေလ်တစ်ခုတည်းထဲသို့ စုထည့်ခြင်း
-        for res in line_results:
+            # 🟢 Game ID တစ်ခုတည်းမှာ Package တွေ အများကြီးပါရင် Report Form တစ်ခုတည်းထဲမှာ ပေါင်းထည့်မည်
             for pr in res['package_results']:
                 safe_ig_name = html.escape(str(pr['ig_name']))
                 
@@ -1104,7 +1093,7 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                     elif "invalid" in error_text or "not found" in error_text:
                         display_err = "Invalid Account"
                     elif "query failed" in error_text:
-                        display_err = "Smileone website error try again."
+                        display_err = "Smileone website api error try again."
                     elif "limit" in error_text or "exceed" in error_text or "máximo" in error_text or "limite" in error_text:
                         display_err = "Weekly Pass Limit Exceeded"
                     elif "zone" in error_text or "region" in error_text or "country" in error_text or "indonesia" in error_text or "support recharge" in error_text or "Singapore" in error_text or "Russia" in error_text or "the Philippines" in error_text:
@@ -1123,15 +1112,15 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                     report += f"ITEM         : {pr['pkg_name']} 💎\n"
                     report += f"ERROR        : {display_err}\n\n"
 
-        # 🟢 နောက်ဆုံးမှသာ Balance သုံးစွဲမှုနှင့် အချိန်ကို တွက်ချက်ပြသခြင်း
-        report += f"DATE         : {date_str}\n"
-        report += f"USERNAME     :\n{safe_username}\n"
-        report += f"INITIAL      : ${initial_bal_for_receipt:,.2f}\n"
-        report += f"FINAL        : ${new_v_bal:,.2f}\n\n"
-        report += f"SUCCESS {grand_success_count} / FAIL {grand_fail_count}\n"
-        report += f"TIME TAKEN   : {time_taken_seconds} SECONDS</pre></blockquote>"
+            report += f"DATE         : {date_str}\n"
+            report += f"USERNAME     :\n{safe_username}\n"
+            report += f"INITIAL      : ${initial_bal_for_receipt:,.2f}\n"
+            report += f"FINAL        : ${new_v_bal:,.2f}\n\n"
+            report += f"SUCCESS {res['success_count']} / FAIL {res['fail_count']}\n"
+            report += f"TIME TAKEN   : {time_taken_seconds} SECONDS</pre></blockquote>"
 
-        await message.reply(report, parse_mode=ParseMode.HTML)
+            # 🟢 Game ID တစ်ခုစာ ပြီးတာနဲ့ Report Form ကို တန်းပို့မည်
+            await message.reply(report, parse_mode=ParseMode.HTML)
 
 @dp.message(F.text.regexp(r"(?i)^(?:msc|mlb|br|b)\s+\d+"))
 async def handle_br_mlbb(message: types.Message):
@@ -1146,8 +1135,8 @@ async def handle_br_mlbb(message: types.Message):
             match = re.search(regex, line)
             if match: total_pkgs += len(match.group(3).split())
             
-        if total_pkgs > 3: 
-            return await message.reply("❌ 5 Limit Exceeded: တစ်ကြိမ်လျှင် အများဆုံး ၃ ခုသာ ဝယ်ယူနိုင်ပါသည်။")
+        if total_pkgs > 10: 
+            return await message.reply("❌ 10 Limit Exceeded: တစ်ကြိမ်လျှင် အများဆုံး ၁၀ ခုသာ ဝယ်ယူနိုင်ပါသည်။")
             
         await execute_buy_process(message, lines, regex, 'BR', [DOUBLE_DIAMOND_PACKAGES, BR_PACKAGES], process_smile_one_order, "MLBB")
     except Exception as e: 
@@ -1166,8 +1155,8 @@ async def handle_ph_mlbb(message: types.Message):
             match = re.search(regex, line)
             if match: total_pkgs += len(match.group(3).split())
             
-        if total_pkgs > 3: 
-            return await message.reply("❌ 5 Limit Exceeded: တစ်ကြိမ်လျှင် အများဆုံး ၃ ခုသာ ဝယ်ယူနိုင်ပါသည်။")
+        if total_pkgs > 10: 
+            return await message.reply("❌ 10 Limit Exceeded: တစ်ကြိမ်လျှင် အများဆုံး ၁၀ ခုသာ ဝယ်ယူနိုင်ပါသည်။")
             
         await execute_buy_process(message, lines, regex, 'PH', PH_PACKAGES, process_smile_one_order, "MLBB")
     except Exception as e: 
