@@ -1067,7 +1067,7 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
             header_title = f"{title_prefix} {res['game_id']} ({res['zone_id']}) {res['raw_items_str'].upper()} ({currency})"
             
             report = f"<blockquote><pre>{header_title}\n"
-            report += f"=== TRANSACTION REPORT ===\n\n"
+            report += f"===== TRANSACTION REPORT =====\n\n"
 
             # 🟢 Game ID တစ်ခုတည်းမှာ Package တွေ အများကြီးပါရင် Report Form တစ်ခုတည်းထဲမှာ ပေါင်းထည့်မည်
             for pr in res['package_results']:
@@ -1113,7 +1113,7 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                     report += f"ERROR        : {display_err}\n\n"
 
             report += f"DATE         : {date_str}\n"
-            report += f"USERNAME     :\n{safe_username}\n"
+            report += f"===== {safe_username} =====\n"
             report += f"INITIAL      : ${initial_bal_for_receipt:,.2f}\n"
             report += f"FINAL        : ${new_v_bal:,.2f}\n\n"
             report += f"SUCCESS {res['success_count']} / FAIL {res['fail_count']}\n"
