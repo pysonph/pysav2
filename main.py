@@ -339,7 +339,7 @@ async def process_smile_one_order(game_id, zone_id, product_id, currency_name, p
             soup = BeautifulSoup(response.text, 'html.parser')
             meta_tag = soup.find('meta', {'name': 'csrf-token'})
             csrf_token = meta_tag.get('content') if meta_tag else (soup.find('input', {'name': '_csrf'}).get('value') if soup.find('input', {'name': '_csrf'}) else None)
-            if not csrf_token: return {"status": "error", "message": "CSRF Token not found. Re-add Cookie."}
+            if not csrf_token: return {"status": "error", "message": "CSRF Token not found. Re-add Cookie.", "ig_name": ig_name}
             GLOBAL_CSRF[cache_key] = csrf_token
 
         async def get_flow_id():
@@ -356,37 +356,39 @@ async def process_smile_one_order(game_id, zone_id, product_id, currency_name, p
             query_response_raw, role_response_raw = await asyncio.gather(get_flow_id(), check_role())
             try:
                 role_result = role_response_raw.json()
-                ig_name = role_result.get('username') or role_result.get('data', {}).get('username')
-                if not ig_name or str(ig_name).strip() == "":
-                    return {"status": "error", "message": "❌ Invalid Account: Account not found."}
+                fetched_name = role_result.get('username') or role_result.get('data', {}).get('username')
+                # 🟢 နာမည်ကို ဖမ်းယူပြီး ig_name ထဲသို့ ထည့်မည်
+                if fetched_name and str(fetched_name).strip() != "":
+                    ig_name = str(fetched_name).strip()
+                else:
+                    return {"status": "error", "message": "❌ Invalid Account: Account not found.", "ig_name": "Unknown"}
             except Exception: 
-                return {"status": "error", "message": "Check Role API Error."}
+                return {"status": "error", "message": "Check Role API Error.", "ig_name": ig_name}
 
         try: query_result = query_response_raw.json()
-        except Exception: return {"status": "error", "message": "Query API Error"}
+        except Exception: return {"status": "error", "message": "Query API Error", "ig_name": ig_name}
             
         flowid = query_result.get('flowid') or query_result.get('data', {}).get('flowid')
         
         if not flowid:
-            # 🟢 ပြင်ဆင်ချက် ၁: info ထဲက စာသားကိုပါ ဖမ်းယူမည်
             real_error = query_result.get('msg') or query_result.get('message') or query_result.get('info') or ""
             
             if "login" in str(real_error).lower() or "unauthorized" in str(real_error).lower():
                 GLOBAL_CSRF[cache_key] = None
                 await notify_owner("⚠️ <b>Order Alert:</b> Cookie expired. Auto-login started...")
                 success = await auto_login_and_get_cookie()
-                if success: return {"status": "error", "message": "Session renewed. Please try again."}
-                else: return {"status": "error", "message": "❌ Auto-Login failed. Please /setcookie."}
+                if success: return {"status": "error", "message": "Session renewed. Please try again.", "ig_name": ig_name}
+                else: return {"status": "error", "message": "❌ Auto-Login failed. Please /setcookie.", "ig_name": ig_name}
                 
-            # 🟢 ပြင်ဆင်ချက် ၂: info စာသား အပြည့်အစုံ ပြန်ပို့ပေးမည် (execute_buy_process မှ Ban Server ဟု ခွဲခြားနိုင်ရန်)
-            return {"status": "error", "message": str(real_error)}
+            # 🟢 Error ဖြစ်လျှင်လည်း ဖမ်းထားသော နာမည်ကို ပြန်ထည့်ပေးမည်
+            return {"status": "error", "message": str(real_error), "ig_name": ig_name}
 
         pay_data = {'_csrf': csrf_token, 'user_id': game_id, 'zone_id': zone_id, 'pay_methond': 'smilecoin', 'product_id': product_id, 'channel_method': 'smilecoin', 'flowid': flowid, 'email': '', 'coupon_id': ''}
         pay_response_raw = await scraper.post(pay_url, data=pay_data, headers=headers)
         pay_text = pay_response_raw.text.lower()
         
         if "saldo insuficiente" in pay_text or "insufficient" in pay_text:
-            return {"status": "error", "message": "Insufficient balance in the Main account."}
+            return {"status": "error", "message": "Insufficient balance in the Main account.", "ig_name": ig_name}
         
         real_order_id, is_success = "Not found", False
         actual_product_name = ""
@@ -396,7 +398,6 @@ async def process_smile_one_order(game_id, zone_id, product_id, currency_name, p
             status_val = str(pay_json.get('status', ''))
             code = str(pay_json.get('code', status_val))
             
-            # 🟢 ပြင်ဆင်ချက် ၃: pay_json တွင်လည်း info ပါလာပါက ဖမ်းယူမည်
             msg = str(pay_json.get('msg') or pay_json.get('message') or pay_json.get('info') or "").lower()
             
             if code in ['200', '0', '1'] or 'success' in msg: 
@@ -429,12 +430,12 @@ async def process_smile_one_order(game_id, zone_id, product_id, currency_name, p
         if is_success:
             return {"status": "success", "ig_name": ig_name, "order_id": real_order_id, "csrf_token": csrf_token, "product_name": actual_product_name}
         else:
-            # Pay မအောင်မြင်ပါက အတိအကျ Error Message ကို ပြန်ပို့မည်
             error_detail = pay_json.get('msg') or pay_json.get('message') or pay_json.get('info') if 'pay_json' in locals() else "Payment Verification Failed."
-            return {"status": "error", "message": str(error_detail)}
+            # 🟢 Pay ငွေဖြတ်ရာတွင် Error ဖြစ်လျှင်လည်း ဖမ်းထားသော နာမည်ကို ပြန်ထည့်ပေးမည်
+            return {"status": "error", "message": str(error_detail), "ig_name": ig_name}
 
     except Exception as e: 
-        return {"status": "error", "message": f"System Error: {str(e)}"}
+        return {"status": "error", "message": f"System Error: {str(e)}", "ig_name": known_ig_name}
 
 async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_context=None, skip_role_check=False, known_ig_name="Unknown", last_success_order_id=""):
     scraper = await get_main_scraper()
@@ -468,12 +469,12 @@ async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_co
         if not csrf_token:
             response = await scraper.get(main_url, headers=headers)
             if response.status_code in [403, 503] or "cloudflare" in response.text.lower():
-                 return {"status": "error", "message": "Blocked by Cloudflare."}
+                 return {"status": "error", "message": "Blocked by Cloudflare.", "ig_name": ig_name}
 
             soup = BeautifulSoup(response.text, 'html.parser')
             meta_tag = soup.find('meta', {'name': 'csrf-token'})
             csrf_token = meta_tag.get('content') if meta_tag else (soup.find('input', {'name': '_csrf'}).get('value') if soup.find('input', {'name': '_csrf'}) else None)
-            if not csrf_token: return {"status": "error", "message": "CSRF Token not found. Add a new Cookie using /setcookie."}
+            if not csrf_token: return {"status": "error", "message": "CSRF Token not found. Add a new Cookie using /setcookie.", "ig_name": ig_name}
             GLOBAL_CSRF[cache_key] = csrf_token
 
         async def get_flow_id():
@@ -490,35 +491,41 @@ async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_co
             query_response_raw, role_response_raw = await asyncio.gather(get_flow_id(), check_role())
             try:
                 role_result = role_response_raw.json()
-                ig_name = role_result.get('username') or role_result.get('data', {}).get('username')
-                if not ig_name or str(ig_name).strip() == "":
-                    return {"status": "error", "message": "Account not found."}
+                fetched_name = role_result.get('username') or role_result.get('data', {}).get('username')
+                # 🟢 နာမည်ကို ဖမ်းယူပြီး ig_name ထဲသို့ ထည့်မည်
+                if fetched_name and str(fetched_name).strip() != "":
+                    ig_name = str(fetched_name).strip()
+                else:
+                    return {"status": "error", "message": "Account not found.", "ig_name": "Unknown"}
             except Exception: 
-                return {"status": "error", "message": "⚠️ Check Role API Error."}
+                return {"status": "error", "message": "⚠️ Check Role API Error.", "ig_name": ig_name}
 
         try: query_result = query_response_raw.json()
-        except Exception: return {"status": "error", "message": "Query API Error"}
+        except Exception: return {"status": "error", "message": "Query API Error", "ig_name": ig_name}
             
         flowid = query_result.get('flowid') or query_result.get('data', {}).get('flowid')
         
         if not flowid:
-            real_error = query_result.get('msg') or query_result.get('message') or ""
+            # 🟢 info ပါ ဖမ်းယူမည်
+            real_error = query_result.get('msg') or query_result.get('message') or query_result.get('info') or ""
             if "login" in str(real_error).lower() or "unauthorized" in str(real_error).lower():
                 GLOBAL_CSRF[cache_key] = None
                 await notify_owner("⚠️ <b>Order Alert:</b> Cookie expired. Auto-login started...")
                 success = await auto_login_and_get_cookie()
                 if success:
-                    return {"status": "error", "message": "Session renewed. Please enter the command again."}
+                    return {"status": "error", "message": "Session renewed. Please enter the command again.", "ig_name": ig_name}
                 else: 
-                    return {"status": "error", "message": "❌ Auto-Login failed. Please provide /setcookie."}
-            return {"status": "error", "message": "Invalid account or unable to purchase."}
+                    return {"status": "error", "message": "❌ Auto-Login failed. Please provide /setcookie.", "ig_name": ig_name}
+            
+            error_display = str(real_error) if real_error else "Invalid account or unable to purchase."
+            return {"status": "error", "message": error_display, "ig_name": ig_name}
 
         pay_data = {'_csrf': csrf_token, 'user_id': game_id, 'zone_id': zone_id, 'pay_methond': 'smilecoin', 'product_id': product_id, 'channel_method': 'smilecoin', 'flowid': flowid, 'email': '', 'coupon_id': ''}
         pay_response_raw = await scraper.post(pay_url, data=pay_data, headers=headers)
         pay_text = pay_response_raw.text.lower()
         
         if "saldo insuficiente" in pay_text or "insufficient" in pay_text:
-            return {"status": "error", "message": "Insufficient balance in the Main account."}
+            return {"status": "error", "message": "Insufficient balance in the Main account.", "ig_name": ig_name}
         
         real_order_id, is_success = "Not found", False
         actual_product_name = ""
@@ -527,7 +534,8 @@ async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_co
             pay_json = pay_response_raw.json()
             status_val = str(pay_json.get('status', ''))
             code = str(pay_json.get('code', status_val))
-            msg = str(pay_json.get('msg', pay_json.get('message', ''))).lower()
+            # 🟢 info ပါ ဖမ်းယူမည်
+            msg = str(pay_json.get('msg') or pay_json.get('message') or pay_json.get('info') or "").lower()
             
             if code in ['200', '0', '1'] or 'success' in msg: 
                 is_success = True
@@ -559,9 +567,12 @@ async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_co
         if is_success:
             return {"status": "success", "ig_name": ig_name, "order_id": real_order_id, "csrf_token": csrf_token, "product_name": actual_product_name}
         else:
-            return {"status": "error", "message": "Payment Verification Failed."}
+            # 🟢 Error အတိအကျနှင့်အတူ နာမည်ကိုပါ တွဲပို့ပေးမည်
+            error_detail = pay_json.get('msg') or pay_json.get('message') or pay_json.get('info') if 'pay_json' in locals() else "Payment Verification Failed."
+            return {"status": "error", "message": str(error_detail), "ig_name": ig_name}
 
-    except Exception as e: return {"status": "error", "message": f"System Error: {str(e)}"}
+    except Exception as e: 
+        return {"status": "error", "message": f"System Error: {str(e)}", "ig_name": known_ig_name}
 
 async def is_authorized(user_id: int):
     if user_id == OWNER_ID:
@@ -1799,21 +1810,21 @@ async def send_welcome(message: types.Message):
         status = "🟢 Aᴄᴛɪᴠᴇ" if await is_authorized(message.from_user.id) else "🔴 Nᴏᴛ Aᴄᴛɪᴠᴇ"
         
         welcome_text = (
-            f"ʜᴇʏ ʙᴀʙʏ <tg-emoji emoji-id='{EMOJI_1}'>🥺</tg-emoji>\n\n"
-            f"<tg-emoji emoji-id='{EMOJI_2}'>👤</tg-emoji> {'Usᴇʀɴᴀᴍᴇ' :<11}: {username_display}\n"
-            f"<tg-emoji emoji-id='{EMOJI_3}'>🆔</tg-emoji> {'𝐈𝐃' :<11}: <code>{tg_id}</code>\n"
-            f"<tg-emoji emoji-id='{EMOJI_4}'>📊</tg-emoji> {'Sᴛᴀᴛᴜs' :<11}: {status}\n\n"
-            f"<tg-emoji emoji-id='{EMOJI_5}'>📞</tg-emoji> {'Cᴏɴᴛᴀᴄᴛ ᴜs' :<11}: @iwillgoforwardsalone"
+            f"<blockquote>ʜᴇʏ ʙᴀʙʏ <tg-emoji emoji-id='{EMOJI_1}'>🥺</tg-emoji>\n\n"
+            f"<tg-emoji emoji-id='{EMOJI_2}'>👤</tg-emoji> <code>{'Usᴇʀɴᴀᴍᴇ' :<11}:</code> {username_display}\n"
+            f"<tg-emoji emoji-id='{EMOJI_3}'>🆔</tg-emoji> <code>{'𝐈𝐃' :<11}:</code> <code>{tg_id}</code>\n"
+            f"<tg-emoji emoji-id='{EMOJI_4}'>📊</tg-emoji> <code>{'Sᴛᴀᴛᴜs' :<11}:</code> {status}\n\n"
+            f"<tg-emoji emoji-id='{EMOJI_5}'>📞</tg-emoji> <code>{'Cᴏɴᴛᴀᴄᴛ ᴜs' :<11}:</code> @iwillgoforwardsalone</blockquote>"
         )
         await message.reply(welcome_text, parse_mode=ParseMode.HTML)
     except Exception:
  
         fallback_text = (
-            f"ʜᴇʏ ʙᴀʙʏ 🥺\n\n"
-            f"👤 {'Usᴇʀɴᴀᴍᴇ' :<11}: {full_name}\n"
-            f"🆔 {'𝐈𝐃' :<11}: <code>{tg_id}</code>\n"
-            f"📊 {'Sᴛᴀᴛᴜs' :<11}: 🔴 Nᴏᴛ Aᴄᴛɪᴠᴇ\n\n"
-            f"📞 {'Cᴏɴᴛᴀᴄᴛ ᴜs' :<11}: @iwillgoforwardsalone"
+            f"<blockquote>ʜᴇʏ ʙᴀʙʏ 🥺\n\n"
+            f"👤 <code>{'Usᴇʀɴᴀᴍᴇ' :<11}:</code> {full_name}\n"
+            f"🆔 <code>{'𝐈𝐃' :<11}:</code> <code>{tg_id}</code>\n"
+            f"📊 <code>{'Sᴛᴀᴛᴜs' :<11}:</code> 🔴 Nᴏᴛ Aᴄᴛɪᴠᴇ\n\n"
+            f"📞 <code>{'Cᴏɴᴛᴀᴄᴛ ᴜs' :<11}:</code> @iwillgoforwardsalone</blockquote>"
         )
         await message.reply(fallback_text, parse_mode=ParseMode.HTML)
 
