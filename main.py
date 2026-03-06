@@ -51,11 +51,8 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 OWNER_ID = int(os.getenv('OWNER_ID', 1318826936))
-#GOOGLE_EMAIL = os.getenv('GOOGLE_EMAIL')
-#GOOGLE_PASS = os.getenv('GOOGLE_PASS')
-FB_EMAIL = os.getenv('FB_EMAIL')
-FB_PASS = os.getenv('FB_PASS')
-
+GOOGLE_EMAIL = os.getenv('GOOGLE_EMAIL')
+GOOGLE_PASS = os.getenv('GOOGLE_PASS')
 
 if not BOT_TOKEN:
     print("❌ Error: BOT_TOKEN is missing in the .env file.")
@@ -423,7 +420,6 @@ async def process_smile_one_order(game_id, zone_id, product_id, currency_name, p
 
         if not is_success:
             try:
-                import asyncio
                 await asyncio.sleep(1.5)
 
                 hist_res_raw = await scraper.get(order_api_url, params={'type': 'orderlist', 'p': '1', 'pageSize': '5'}, headers=headers)
@@ -573,7 +569,6 @@ async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_co
 
         if not is_success:
             try:
-                import asyncio
                 await asyncio.sleep(1.5)
 
                 hist_res_raw = await scraper.get(order_api_url, params={'type': 'orderlist', 'p': '1', 'pageSize': '5'}, headers=headers)
@@ -1025,7 +1020,6 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                                 break
                                 
                             if attempt < max_retries - 1:
-                                import asyncio
                                 await asyncio.sleep(1.5)
                                 
                         fetched_name = res.get('ig_name') or res.get('username') or res.get('role_name') or res.get('nickname')
