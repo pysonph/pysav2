@@ -51,8 +51,8 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 OWNER_ID = int(os.getenv('OWNER_ID', 1318826936))
-FB_EMAIL = os.getenv('FB_EMAIL')
-FB_PASS = os.getenv('FB_PASS')
+GOOGLE_EMAIL = os.getenv('GOOGLE_EMAIL')
+GOOGLE_PASS = os.getenv('GOOGLE_PASS')
 
 if not BOT_TOKEN:
     print("❌ Error: BOT_TOKEN is missing in the .env file.")
@@ -96,19 +96,21 @@ async def get_main_scraper():
 async def auto_login_and_get_cookie():
     global last_login_time, GLOBAL_SCRAPER, GLOBAL_CSRF
     
-    if not FB_EMAIL or not FB_PASS:
-        print("❌ FB_EMAIL and FB_PASS are missing in .env.")
+    if not GOOGLE_EMAIL or not GOOGLE_PASS:
+        print("❌ GOOGLE_EMAIL and GOOGLE_PASS are missing in .env.")
         return False
         
     async with auth_lock:
         if time.time() - last_login_time < 120:
             return True
 
-        print("Logging in with Facebook to fetch new Cookie...")
+        print("Logging in with Google to fetch new Cookie...")
         try:
             async with async_playwright() as p:
                 browser = await p.chromium.launch(
-                    headless=True,
+                    # Google Bot Detection ကို ရှောင်နိုင်ရန် အစပိုင်းတွင် False ထားပြီး စမ်းသပ်ပါ။
+                    # အဆင်ပြေမှ True ပြန်ပြောင်းပါ။
+                    headless=False, 
                     args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled']
                 )
                 context = await browser.new_context(
@@ -120,23 +122,29 @@ async def auto_login_and_get_cookie():
                 await page.goto("https://www.smile.one/customer/login")
                 await asyncio.sleep(5)
                 
+                # Sign in with Google Button ကို နှိပ်ခြင်း
                 async with context.expect_page() as popup_info:
-                    await page.locator("a.login-btn-facebook, a[href*='facebook.com']").first.click()
+                    await page.locator("text=Sign in with Google").first.click()
                 
-                fb_popup = await popup_info.value
-                await fb_popup.wait_for_load_state()
+                google_popup = await popup_info.value
+                await google_popup.wait_for_load_state()
                 
+                # Google Email ရိုက်ထည့်ခြင်း
                 await asyncio.sleep(2)
-                await fb_popup.fill('input[name="email"]', FB_EMAIL)
+                await google_popup.fill('input[type="email"]', GOOGLE_EMAIL)
                 await asyncio.sleep(1)
-                await fb_popup.fill('input[name="pass"]', FB_PASS)
-                await asyncio.sleep(1)
+                await google_popup.keyboard.press("Enter") # Next ကိုနှိပ်ရန် Enter ခေါက်သည်
                 
-                await fb_popup.click('button[name="login"], input[name="login"]')
+                # Google Password ရိုက်ထည့်ခြင်း (Email စစ်ပြီး Password field ပေါ်လာရန်စောင့်သည်)
+                await asyncio.sleep(4) 
+                await google_popup.fill('input[type="password"]', GOOGLE_PASS)
+                await asyncio.sleep(1)
+                await google_popup.keyboard.press("Enter") # Login ဝင်ရန် Enter ခေါက်သည်
                 
                 try:
+                    # Login အောင်မြင်ပြီး Order page သို့ ရောက်/မရောက် စောင့်ကြည့်သည်
                     await page.wait_for_url("**/customer/order**", timeout=30000)
-                    print("✅ Auto-Login successful. Saving Cookie...")
+                    print("✅ Auto-Login (Google) successful. Saving Cookie...")
                     
                     cookies = await context.cookies()
                     cookie_dict = {cookie['name']: cookie['value'] for cookie in cookies}
@@ -151,12 +159,12 @@ async def auto_login_and_get_cookie():
                     return True
                     
                 except Exception as wait_e:
-                    print(f"❌ Did not reach the Order page. (Possible Checkpoint): {wait_e}")
+                    print(f"❌ Did not reach the Order page. (Google blocked or Checkpoint): {wait_e}")
                     await browser.close()
                     return False
                 
         except Exception as e:
-            print(f"❌ Error during Auto-Login: {e}")
+            print(f"❌ Error during Google Auto-Login: {e}")
             return False
 
 DOUBLE_DIAMOND_PACKAGES = {
@@ -322,11 +330,11 @@ async def process_smile_one_order(game_id, zone_id, product_id, currency_name, p
         query_url = 'https://www.smile.one/merchant/mobilelegends/query'
         pay_url = 'https://www.smile.one/merchant/mobilelegends/pay'
         order_api_url = 'https://www.smile.one/customer/activationcode/codelist'
-    
+
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'X-Requested-With': 'XMLHttpRequest', 
-        'Referer': main_url, 
+        'X-Requested-With': 'XMLHttpRequest',
+        'Referer': main_url,
         'Origin': 'https://www.smile.one'
     }
 
@@ -339,7 +347,7 @@ async def process_smile_one_order(game_id, zone_id, product_id, currency_name, p
             soup = BeautifulSoup(response.text, 'html.parser')
             meta_tag = soup.find('meta', {'name': 'csrf-token'})
             csrf_token = meta_tag.get('content') if meta_tag else (soup.find('input', {'name': '_csrf'}).get('value') if soup.find('input', {'name': '_csrf'}) else None)
-            if not csrf_token: return {"status": "error", "message": "CSRF Token not found. Re-add Cookie.", "ig_name": ig_name}
+            if not csrf_token: return {"status": "error", "message": "CSRF Token not found.", "ig_name": ig_name}
             GLOBAL_CSRF[cache_key] = csrf_token
 
         async def get_flow_id():
@@ -357,39 +365,47 @@ async def process_smile_one_order(game_id, zone_id, product_id, currency_name, p
             try:
                 role_result = role_response_raw.json()
                 fetched_name = role_result.get('username') or role_result.get('data', {}).get('username')
-                # 🟢 နာမည်ကို ဖမ်းယူပြီး ig_name ထဲသို့ ထည့်မည်
                 if fetched_name and str(fetched_name).strip() != "":
                     ig_name = str(fetched_name).strip()
                 else:
-                    return {"status": "error", "message": "❌ Invalid Account: Account not found.", "ig_name": "Unknown"}
-            except Exception: 
+                    return {"status": "error", "message": "Account not found.", "ig_name": "Unknown"}
+            except Exception:
                 return {"status": "error", "message": "Check Role API Error.", "ig_name": ig_name}
 
         try: query_result = query_response_raw.json()
         except Exception: return {"status": "error", "message": "Query API Error", "ig_name": ig_name}
-            
+
         flowid = query_result.get('flowid') or query_result.get('data', {}).get('flowid')
-        
+
         if not flowid:
             real_error = query_result.get('msg') or query_result.get('message') or query_result.get('info') or ""
-            
             if "login" in str(real_error).lower() or "unauthorized" in str(real_error).lower():
                 GLOBAL_CSRF[cache_key] = None
                 await notify_owner("⚠️ <b>Order Alert:</b> Cookie expired. Auto-login started...")
                 success = await auto_login_and_get_cookie()
                 if success: return {"status": "error", "message": "Session renewed. Please try again.", "ig_name": ig_name}
                 else: return {"status": "error", "message": "❌ Auto-Login failed. Please /setcookie.", "ig_name": ig_name}
-                
-            # 🟢 Error ဖြစ်လျှင်လည်း ဖမ်းထားသော နာမည်ကို ပြန်ထည့်ပေးမည်
             return {"status": "error", "message": str(real_error), "ig_name": ig_name}
+
+        # 🟢 [CRITICAL FIX] 1. ငွေမဖြတ်ခင် ပြေစာအဟောင်းများကို အရင်ဆွဲယူမှတ်သားထားခြင်း
+        old_order_ids = set()
+        try:
+            pre_hist_res = await scraper.get(order_api_url, params={'type': 'orderlist', 'p': '1', 'pageSize': '5'}, headers=headers)
+            pre_hist_json = pre_hist_res.json()
+            if 'list' in pre_hist_json:
+                for order in pre_hist_json['list']:
+                    old_id = str(order.get('increment_id', ''))
+                    if old_id: old_order_ids.add(old_id)
+        except: pass
+        # 🟢 =======================================================
 
         pay_data = {'_csrf': csrf_token, 'user_id': game_id, 'zone_id': zone_id, 'pay_methond': 'smilecoin', 'product_id': product_id, 'channel_method': 'smilecoin', 'flowid': flowid, 'email': '', 'coupon_id': ''}
         pay_response_raw = await scraper.post(pay_url, data=pay_data, headers=headers)
         pay_text = pay_response_raw.text.lower()
-        
+
         if "saldo insuficiente" in pay_text or "insufficient" in pay_text:
             return {"status": "error", "message": "Insufficient balance in the Main account.", "ig_name": ig_name}
-        
+
         real_order_id, is_success = "Not found", False
         actual_product_name = ""
 
@@ -397,29 +413,33 @@ async def process_smile_one_order(game_id, zone_id, product_id, currency_name, p
             pay_json = pay_response_raw.json()
             status_val = str(pay_json.get('status', ''))
             code = str(pay_json.get('code', status_val))
-            
             msg = str(pay_json.get('msg') or pay_json.get('message') or pay_json.get('info') or "").lower()
-            
-            if code in ['200', '0', '1'] or 'success' in msg: 
+
+            if code in ['200', '0', '1'] or 'success' in msg:
                 is_success = True
                 _id = str(pay_json.get('data', {}).get('order_id') or pay_json.get('order_id') or pay_json.get('increment_id') or "")
                 if not _id or _id == "None":
                     _id = f"FAST_{int(time.time())}_{random.randint(100,999)}"
                 real_order_id = _id
         except:
-            if 'success' in pay_text or 'sucesso' in pay_text: 
+            if 'success' in pay_text or 'sucesso' in pay_text:
                 is_success = True
                 real_order_id = f"FAST_{int(time.time())}_{random.randint(100,999)}"
 
         if not is_success:
             try:
+                import asyncio
+                await asyncio.sleep(1.5)
+
                 hist_res_raw = await scraper.get(order_api_url, params={'type': 'orderlist', 'p': '1', 'pageSize': '5'}, headers=headers)
                 hist_json = hist_res_raw.json()
                 if 'list' in hist_json and len(hist_json['list']) > 0:
                     for order in hist_json['list']:
                         if str(order.get('user_id')) == str(game_id) and str(order.get('server_id')) == str(zone_id):
                             current_order_id = str(order.get('increment_id', ""))
-                            if current_order_id != last_success_order_id:
+
+                            # 🟢 [CRITICAL FIX] 2. ပြေစာဟောင်းများထဲတွင် မပါဝင်သော အသစ်ဖြစ်ကြောင်း သေချာစစ်ဆေးခြင်း
+                            if current_order_id and current_order_id not in old_order_ids and current_order_id != last_success_order_id:
                                 if str(order.get('order_status', '')).lower() in ['success', '1'] or str(order.get('status')) == '1':
                                     real_order_id = current_order_id
                                     actual_product_name = str(order.get('product_name', ''))
@@ -431,10 +451,9 @@ async def process_smile_one_order(game_id, zone_id, product_id, currency_name, p
             return {"status": "success", "ig_name": ig_name, "order_id": real_order_id, "csrf_token": csrf_token, "product_name": actual_product_name}
         else:
             error_detail = pay_json.get('msg') or pay_json.get('message') or pay_json.get('info') if 'pay_json' in locals() else "Payment Verification Failed."
-            # 🟢 Pay ငွေဖြတ်ရာတွင် Error ဖြစ်လျှင်လည်း ဖမ်းထားသော နာမည်ကို ပြန်ထည့်ပေးမည်
             return {"status": "error", "message": str(error_detail), "ig_name": ig_name}
 
-    except Exception as e: 
+    except Exception as e:
         return {"status": "error", "message": f"System Error: {str(e)}", "ig_name": known_ig_name}
 
 async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_context=None, skip_role_check=False, known_ig_name="Unknown", last_success_order_id=""):
@@ -474,7 +493,7 @@ async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_co
             soup = BeautifulSoup(response.text, 'html.parser')
             meta_tag = soup.find('meta', {'name': 'csrf-token'})
             csrf_token = meta_tag.get('content') if meta_tag else (soup.find('input', {'name': '_csrf'}).get('value') if soup.find('input', {'name': '_csrf'}) else None)
-            if not csrf_token: return {"status": "error", "message": "CSRF Token not found. Add a new Cookie using /setcookie.", "ig_name": ig_name}
+            if not csrf_token: return {"status": "error", "message": "CSRF Token not found.", "ig_name": ig_name}
             GLOBAL_CSRF[cache_key] = csrf_token
 
         async def get_flow_id():
@@ -492,7 +511,6 @@ async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_co
             try:
                 role_result = role_response_raw.json()
                 fetched_name = role_result.get('username') or role_result.get('data', {}).get('username')
-                # 🟢 နာမည်ကို ဖမ်းယူပြီး ig_name ထဲသို့ ထည့်မည်
                 if fetched_name and str(fetched_name).strip() != "":
                     ig_name = str(fetched_name).strip()
                 else:
@@ -506,19 +524,30 @@ async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_co
         flowid = query_result.get('flowid') or query_result.get('data', {}).get('flowid')
         
         if not flowid:
-            # 🟢 info ပါ ဖမ်းယူမည်
             real_error = query_result.get('msg') or query_result.get('message') or query_result.get('info') or ""
             if "login" in str(real_error).lower() or "unauthorized" in str(real_error).lower():
                 GLOBAL_CSRF[cache_key] = None
                 await notify_owner("⚠️ <b>Order Alert:</b> Cookie expired. Auto-login started...")
                 success = await auto_login_and_get_cookie()
                 if success:
-                    return {"status": "error", "message": "Session renewed. Please enter the command again.", "ig_name": ig_name}
+                    return {"status": "error", "message": "Session renewed. Please try again.", "ig_name": ig_name}
                 else: 
-                    return {"status": "error", "message": "❌ Auto-Login failed. Please provide /setcookie.", "ig_name": ig_name}
+                    return {"status": "error", "message": "❌ Auto-Login failed.", "ig_name": ig_name}
             
             error_display = str(real_error) if real_error else "Invalid account or unable to purchase."
             return {"status": "error", "message": error_display, "ig_name": ig_name}
+
+        # 🟢 [CRITICAL FIX] 1. ငွေမဖြတ်ခင် ပြေစာအဟောင်းများကို အရင်ဆွဲယူမှတ်သားထားခြင်း
+        old_order_ids = set()
+        try:
+            pre_hist_res = await scraper.get(order_api_url, params={'type': 'orderlist', 'p': '1', 'pageSize': '5'}, headers=headers)
+            pre_hist_json = pre_hist_res.json()
+            if 'list' in pre_hist_json:
+                for order in pre_hist_json['list']:
+                    old_id = str(order.get('increment_id', ''))
+                    if old_id: old_order_ids.add(old_id)
+        except: pass
+        # 🟢 =======================================================
 
         pay_data = {'_csrf': csrf_token, 'user_id': game_id, 'zone_id': zone_id, 'pay_methond': 'smilecoin', 'product_id': product_id, 'channel_method': 'smilecoin', 'flowid': flowid, 'email': '', 'coupon_id': ''}
         pay_response_raw = await scraper.post(pay_url, data=pay_data, headers=headers)
@@ -534,7 +563,6 @@ async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_co
             pay_json = pay_response_raw.json()
             status_val = str(pay_json.get('status', ''))
             code = str(pay_json.get('code', status_val))
-            # 🟢 info ပါ ဖမ်းယူမည်
             msg = str(pay_json.get('msg') or pay_json.get('message') or pay_json.get('info') or "").lower()
             
             if code in ['200', '0', '1'] or 'success' in msg: 
@@ -550,13 +578,18 @@ async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_co
 
         if not is_success:
             try:
+                import asyncio
+                await asyncio.sleep(1.5)
+
                 hist_res_raw = await scraper.get(order_api_url, params={'type': 'orderlist', 'p': '1', 'pageSize': '5'}, headers=headers)
                 hist_json = hist_res_raw.json()
                 if 'list' in hist_json and len(hist_json['list']) > 0:
                     for order in hist_json['list']:
                         if str(order.get('user_id')) == str(game_id) and str(order.get('server_id')) == str(zone_id):
                             current_order_id = str(order.get('increment_id', ""))
-                            if current_order_id != last_success_order_id:
+
+                            # 🟢 [CRITICAL FIX] 2. ပြေစာဟောင်းများထဲတွင် မပါဝင်သော အသစ်ဖြစ်ကြောင်း သေချာစစ်ဆေးခြင်း
+                            if current_order_id and current_order_id not in old_order_ids and current_order_id != last_success_order_id:
                                 if str(order.get('order_status', '')).lower() in ['success', '1'] or str(order.get('status')) == '1':
                                     real_order_id = current_order_id
                                     actual_product_name = str(order.get('product_name', ''))
@@ -567,7 +600,6 @@ async def process_mcc_order(game_id, zone_id, product_id, currency_name, prev_co
         if is_success:
             return {"status": "success", "ig_name": ig_name, "order_id": real_order_id, "csrf_token": csrf_token, "product_name": actual_product_name}
         else:
-            # 🟢 Error အတိအကျနှင့်အတူ နာမည်ကိုပါ တွဲပို့ပေးမည်
             error_detail = pay_json.get('msg') or pay_json.get('message') or pay_json.get('info') if 'pay_json' in locals() else "Payment Verification Failed."
             return {"status": "error", "message": str(error_detail), "ig_name": ig_name}
 
@@ -868,7 +900,12 @@ async def clean_order_history(message: types.Message):
 async def execute_buy_process(message, lines, regex_pattern, currency, packages_dict, process_func, title_prefix, is_mcc=False):
     tg_id = str(message.from_user.id)
     telegram_user = message.from_user.username
-    username_display = f"@{telegram_user}" if telegram_user else tg_id
+    
+    if telegram_user:
+        user_link = f'<a href="https://t.me/{telegram_user}">@{telegram_user}</a>'
+    else:
+        user_link = f'<a href="tg://user?id={tg_id}">{tg_id}</a>'
+        
     v_bal_key = 'br_balance' if currency == 'BR' else 'ph_balance'
     
     async with user_locks[tg_id]: 
@@ -937,7 +974,7 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
         user_v_bal = user_wallet.get(v_bal_key, 0.0) if user_wallet else 0.0
             
         start_time = time.time()
-        loading_msg = await message.reply(f"Order processing [ {len(parsed_orders)} | 0 ] ● ᥫ᭡")
+        loading_msg = await message.reply(f"နှလုံးသားမပါရင် ဘယ်အရာမှတရားမဝင်[ {len(parsed_orders)} | 0 ] ● ᥫ᭡")
 
         current_v_bal = [user_v_bal] 
 
@@ -962,16 +999,16 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                     pkg_name = pkg_data['pkg_name']
                     items = pkg_data['items']
                     
-                    pkg_success = True
-                    pkg_order_ids = ""
+                    pkg_success_count = 0
+                    pkg_fail_count = 0
                     pkg_spent = 0.0
+                    pkg_order_ids = ""
                     pkg_error = ""
                     
                     for item in items:
                         if current_v_bal[0] < item['price']:
-                            pkg_success = False
+                            pkg_fail_count += 1
                             pkg_error = "Insufficient balance"
-                            overall_fail_count += 1
                             break
 
                         current_v_bal[0] -= item['price']
@@ -1001,32 +1038,57 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                             ig_name = str(fetched_name).strip()
 
                         if res.get('status') == 'success':
+                            pkg_success_count += 1
                             pkg_spent += item['price']
                             pkg_order_ids += f"{res.get('order_id', '')}\n"
                             prev_context = {'csrf_token': res.get('csrf_token')}
                             last_success_order = res.get('order_id', '')
                         else:
                             current_v_bal[0] += item['price']
-                            pkg_success = False
+                            pkg_fail_count += 1
                             pkg_error = res.get('message', 'Unknown Error')
-                            break
+                            break # Error တက်လျှင် ထို Package ၏ နောက်ထပ် Item များကို ဆက်မဝယ်တော့ဘဲ ရပ်မည်
                             
-                    if pkg_success:
+                    # 🟢 တစ်စိတ်တစ်ပိုင်း အောင်မြင်မှုများကို သီးခြားခွဲထုတ်ခြင်း
+                    if pkg_success_count > 0:
                         overall_success_count += 1
                         total_spent += pkg_spent
-                    else:
-                        if pkg_spent > 0:
-                            total_spent += pkg_spent
+                        
+                        display_name = pkg_name
+                        if len(items) > 1 and pkg_success_count < len(items):
+                            if pkg_name.upper().startswith("WP"):
+                                display_name = f"WP{pkg_success_count}"
+                            else:
+                                display_name = f"{pkg_name} ({pkg_success_count}/{len(items)} Success)"
+                                
+                        package_results.append({
+                            'pkg_name': display_name,
+                            'status': 'success',
+                            'spent': pkg_spent,
+                            'order_ids': pkg_order_ids.strip(),
+                            'error_msg': "",
+                            'ig_name': ig_name
+                        })
+                        
+                    # 🟢 တစ်စိတ်တစ်ပိုင်း ကျရှုံးမှုများကို သီးခြားခွဲထုတ်ခြင်း
+                    if pkg_fail_count > 0:
                         overall_fail_count += 1
                         
-                    package_results.append({
-                        'pkg_name': pkg_name,
-                        'status': 'success' if pkg_success else 'fail',
-                        'spent': pkg_spent,
-                        'order_ids': pkg_order_ids.strip(),
-                        'error_msg': pkg_error,
-                        'ig_name': ig_name
-                    })
+                        display_name = pkg_name
+                        if len(items) > 1 and pkg_fail_count < len(items):
+                            if pkg_name.upper().startswith("WP"):
+                                display_name = f"WP{len(items) - pkg_success_count}"
+                            else:
+                                display_name = f"{pkg_name} ({len(items) - pkg_success_count} Failed)"
+                                
+                        package_results.append({
+                            'pkg_name': display_name,
+                            'status': 'fail',
+                            'spent': 0.0,
+                            'order_ids': "",
+                            'error_msg': pkg_error,
+                            'ig_name': ig_name
+                        })
                         
             return {
                 'game_id': game_id, 
@@ -1049,11 +1111,8 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
         import datetime
         now = datetime.datetime.now(MMT) 
         date_str = now.strftime("%m/%d/%Y, %I:%M:%S %p")
-        safe_username = html.escape(str(username_display))
 
-        # 🟢 စာကြောင်း (Game ID) တစ်ကြောင်းစီအတွက် Report Form တစ်စောင်စီ သီးခြား ထုတ်ပေးမည်
         for res in line_results:
-            # 🟢 Report တစ်ခုချင်းစီအတွက် Balance ကို သီးခြား ပြန်ခေါ်ပြီး တွက်ချက်မည်
             current_wallet = await db.get_reseller(tg_id)
             initial_bal_for_receipt = current_wallet.get(v_bal_key, 0.0) if current_wallet else 0.0
             
@@ -1067,9 +1126,8 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
             header_title = f"{title_prefix} {res['game_id']} ({res['zone_id']}) {res['raw_items_str'].upper()} ({currency})"
             
             report = f"<blockquote><pre>{header_title}\n"
-            report += f"===== TRANSACTION REPORT =====\n\n"
+            report += f"=== TRANSACTION REPORT ===\n\n"
 
-            # 🟢 Game ID တစ်ခုတည်းမှာ Package တွေ အများကြီးပါရင် Report Form တစ်ခုတည်းထဲမှာ ပေါင်းထည့်မည်
             for pr in res['package_results']:
                 safe_ig_name = html.escape(str(pr['ig_name']))
                 
@@ -1113,13 +1171,12 @@ async def execute_buy_process(message, lines, regex_pattern, currency, packages_
                     report += f"ERROR        : {display_err}\n\n"
 
             report += f"DATE         : {date_str}\n"
-            report += f"===== {safe_username} =====\n"
+            report += f"===== {user_link} =====\n"
             report += f"INITIAL      : ${initial_bal_for_receipt:,.2f}\n"
             report += f"FINAL        : ${new_v_bal:,.2f}\n\n"
             report += f"SUCCESS {res['success_count']} / FAIL {res['fail_count']}\n"
             report += f"TIME TAKEN   : {time_taken_seconds} SECONDS</pre></blockquote>"
 
-            # 🟢 Game ID တစ်ခုစာ ပြီးတာနဲ့ Report Form ကို တန်းပို့မည်
             await message.reply(report, parse_mode=ParseMode.HTML)
 
 @dp.message(F.text.regexp(r"(?i)^(?:msc|mlb|br|b)\s+\d+"))
