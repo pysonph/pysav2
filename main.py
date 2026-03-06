@@ -51,8 +51,11 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 OWNER_ID = int(os.getenv('OWNER_ID', 1318826936))
-GOOGLE_EMAIL = os.getenv('GOOGLE_EMAIL')
-GOOGLE_PASS = os.getenv('GOOGLE_PASS')
+#GOOGLE_EMAIL = os.getenv('GOOGLE_EMAIL')
+#GOOGLE_PASS = os.getenv('GOOGLE_PASS')
+FB_EMAIL = os.getenv('FB_EMAIL')
+FB_PASS = os.getenv('FB_PASS')
+
 
 if not BOT_TOKEN:
     print("❌ Error: BOT_TOKEN is missing in the .env file.")
@@ -96,21 +99,19 @@ async def get_main_scraper():
 async def auto_login_and_get_cookie():
     global last_login_time, GLOBAL_SCRAPER, GLOBAL_CSRF
     
-    if not GOOGLE_EMAIL or not GOOGLE_PASS:
-        print("❌ GOOGLE_EMAIL and GOOGLE_PASS are missing in .env.")
+    if not FB_EMAIL or not FB_PASS:
+        print("❌ FB_EMAIL and FB_PASS are missing in .env.")
         return False
         
     async with auth_lock:
         if time.time() - last_login_time < 120:
             return True
 
-        print("Logging in with Google to fetch new Cookie...")
+        print("Logging in with Facebook to fetch new Cookie...")
         try:
             async with async_playwright() as p:
                 browser = await p.chromium.launch(
-                    # Google Bot Detection ကို ရှောင်နိုင်ရန် အစပိုင်းတွင် False ထားပြီး စမ်းသပ်ပါ။
-                    # အဆင်ပြေမှ True ပြန်ပြောင်းပါ။
-                    headless=False, 
+                    headless=True,
                     args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled']
                 )
                 context = await browser.new_context(
@@ -122,29 +123,23 @@ async def auto_login_and_get_cookie():
                 await page.goto("https://www.smile.one/customer/login")
                 await asyncio.sleep(5)
                 
-                # Sign in with Google Button ကို နှိပ်ခြင်း
                 async with context.expect_page() as popup_info:
-                    await page.locator("text=Sign in with Google").first.click()
+                    await page.locator("a.login-btn-facebook, a[href*='facebook.com']").first.click()
                 
-                google_popup = await popup_info.value
-                await google_popup.wait_for_load_state()
+                fb_popup = await popup_info.value
+                await fb_popup.wait_for_load_state()
                 
-                # Google Email ရိုက်ထည့်ခြင်း
                 await asyncio.sleep(2)
-                await google_popup.fill('input[type="email"]', GOOGLE_EMAIL)
+                await fb_popup.fill('input[name="email"]', FB_EMAIL)
                 await asyncio.sleep(1)
-                await google_popup.keyboard.press("Enter") # Next ကိုနှိပ်ရန် Enter ခေါက်သည်
+                await fb_popup.fill('input[name="pass"]', FB_PASS)
+                await asyncio.sleep(1)
                 
-                # Google Password ရိုက်ထည့်ခြင်း (Email စစ်ပြီး Password field ပေါ်လာရန်စောင့်သည်)
-                await asyncio.sleep(4) 
-                await google_popup.fill('input[type="password"]', GOOGLE_PASS)
-                await asyncio.sleep(1)
-                await google_popup.keyboard.press("Enter") # Login ဝင်ရန် Enter ခေါက်သည်
+                await fb_popup.click('button[name="login"], input[name="login"]')
                 
                 try:
-                    # Login အောင်မြင်ပြီး Order page သို့ ရောက်/မရောက် စောင့်ကြည့်သည်
                     await page.wait_for_url("**/customer/order**", timeout=30000)
-                    print("✅ Auto-Login (Google) successful. Saving Cookie...")
+                    print("✅ Auto-Login successful. Saving Cookie...")
                     
                     cookies = await context.cookies()
                     cookie_dict = {cookie['name']: cookie['value'] for cookie in cookies}
@@ -159,12 +154,12 @@ async def auto_login_and_get_cookie():
                     return True
                     
                 except Exception as wait_e:
-                    print(f"❌ Did not reach the Order page. (Google blocked or Checkpoint): {wait_e}")
+                    print(f"❌ Did not reach the Order page. (Possible Checkpoint): {wait_e}")
                     await browser.close()
                     return False
                 
         except Exception as e:
-            print(f"❌ Error during Google Auto-Login: {e}")
+            print(f"❌ Error during Auto-Login: {e}")
             return False
 
 DOUBLE_DIAMOND_PACKAGES = {
