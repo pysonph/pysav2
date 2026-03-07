@@ -18,4 +18,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # သင့်ရဲ့ Run မည့် Python ဖိုင်နာမည် မှန်ကန်ကြောင်း သေချာစစ်ဆေးပါ (ဥပမာ - main.py သို့မဟုတ် test.py)
-CMD ["python", "webmain.py"]
+CMD ["python", "topup.py"]
